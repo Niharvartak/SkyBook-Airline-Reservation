@@ -184,6 +184,12 @@ app.get("/api/me", requireAuth, (req, res) => {
   res.json({ ok: true, user });
 });
 
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  const user = getUserById(req.user.id);
+  if (!user) return res.status(404).json({ ok: false, message: "User not found." });
+  res.json({ ok: true, user });
+});
+
 // --------------------------------------------------
 // DESTINATIONS (new comprehensive list)
 // --------------------------------------------------
@@ -375,7 +381,7 @@ app.get("/api/bookings", requireAuth, (req, res) => {
   try {
     const bookings = db.prepare(`
       SELECT b.id, b.pnr, b.travelDate AS departureDate, b.passengerName, b.passengerCount,
-             b.seatNumbers, b.totalPrice, b.status, b.createdAt, b.contactEmail, b.contactPhone, b.passengers, b.promoCode,
+             b.seatNumbers, b.totalPrice, b.status, b.createdAt, b.contactEmail, b.contactPhone, b.passengers, b.promo_code AS promoCode,
              f.flightNumber, f.airline, f.origin, f.destination, f.departureTime, f.arrivalTime
       FROM bookings b
       LEFT JOIN flights f ON f.id = b.flightId
@@ -464,7 +470,7 @@ app.post("/api/bookings", requireAuth, (req, res) => {
 
     // Create booking
     const result = db.prepare(`
-      INSERT INTO bookings (userId, flightId, travelDate, passengerName, passengerCount, seatNumbers, totalPrice, pnr, status, contactEmail, contactPhone, passengers, promoCode)
+      INSERT INTO bookings (userId, flightId, travelDate, passengerName, passengerCount, seatNumbers, totalPrice, pnr, status, contactEmail, contactPhone, passengers, promo_code)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, ?, ?, ?)
     `).run(
       req.user.id, Number(flightId), travelDate, passengerName,

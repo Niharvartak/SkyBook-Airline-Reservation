@@ -12,11 +12,11 @@ dist-ssr
 **/.env.*
 !**/.env.example
 *.log
-*.db
 *.db-*
 *.sqlite
 *.sqlite3
 *.sqlite-*
+!src/backend/skybook.db
 **/data
 coverage
 count_output.txt

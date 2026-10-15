@@ -1,49 +1,23 @@
 services:
-  db:
-    image: mariadb:10.11
-    restart: unless-stopped
-    environment:
-      MARIADB_DATABASE: ${MYSQL_DATABASE:-skybook}
-      MARIADB_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
-      MARIADB_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
-      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
-    volumes:
-      - mariadb_data:/var/lib/mysql
-      - ./backend-java/db/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 15s
-
   backend:
     build:
       context: .
-      dockerfile: backend-java/Dockerfile
+      dockerfile: Dockerfile.backend
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      MYSQL_HOST: db
-      MYSQL_PORT: "3306"
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-skybook}
-      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      SKYBOOK_CORS_ALLOWED_ORIGINS: ${SKYBOOK_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
-      SPRING_JPA_HIBERNATE_DDL_AUTO: none
-      SPRING_JPA_SHOW_SQL: "false"
-      SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "false"
-    depends_on:
-      db:
-        condition: service_healthy
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      PORT: "8080"
+    volumes:
+      - skybook_data:/app/data
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/health >/dev/null"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:8080/api/health > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 45s
+      start_period: 15s
 
   frontend:
     build:
@@ -65,4 +39,4 @@ services:
       start_period: 5s
 
 volumes:
-  mariadb_data:
+  skybook_data:
