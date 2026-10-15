@@ -1,0 +1,95 @@
+{
+  "info": {
+    "name": "SkyBook Experiment 05 - verified MariaDB CRUD",
+    "_postman_id": "68d9a3e2-32a1-46ec-8305-a5e000000005",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Existing XAMPP MariaDB accessed by Spring Boot, Hibernate and MySQL Connector/J. Run in order. Creates one uniquely named test flight and leaves it deactivated. No database credentials needed in Postman."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "flightId", "value": "" },
+    { "key": "flightNumber", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "C - POST create practical flight (run first)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('flightNumber', 'EXP05-' + Date.now());",
+              "pm.collectionVariables.set('flightId', '');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Created', () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) pm.collectionVariables.set('flightId', String(pm.response.json().flight.id));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/flights",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"flightNumber\": \"{{flightNumber}}\",\n  \"airline\": \"SkyBook Practical\",\n  \"origin\": \"Mumbai (BOM)\",\n  \"destination\": \"Delhi (DEL)\",\n  \"departureDate\": \"2026-12-15\",\n  \"departureTime\": \"09:00 AM\",\n  \"arrivalTime\": \"11:15 AM\",\n  \"price\": 4500,\n  \"status\": \"On Time\",\n  \"active\": true\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    },
+    {
+      "name": "A - GET all flights",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights" }
+    },
+    {
+      "name": "B - GET flight by generated ID",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/{{flightId}}" }
+    },
+    {
+      "name": "D - PUT update practical flight",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/flights/{{flightId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"flightNumber\": \"{{flightNumber}}\",\n  \"airline\": \"SkyBook Practical\",\n  \"origin\": \"Mumbai (BOM)\",\n  \"destination\": \"Delhi (DEL)\",\n  \"departureDate\": \"2026-12-15\",\n  \"departureTime\": \"09:30 AM\",\n  \"arrivalTime\": \"11:15 AM\",\n  \"price\": 4750,\n  \"status\": \"Delayed\",\n  \"active\": true\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      }
+    },
+    {
+      "name": "B - GET updated flight",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/{{flightId}}" }
+    },
+    {
+      "name": "F - GET search by route",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/search?from=BOM&to=DEL" }
+    },
+    {
+      "name": "F - GET search by route and date",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/search?from=BOM&to=DEL&departureDate=2026-12-15" }
+    },
+    {
+      "name": "E - DELETE deactivate practical flight",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/flights/{{flightId}}" }
+    },
+    {
+      "name": "GET after DELETE - active is false (record retained)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/{{flightId}}" }
+    },
+    {
+      "name": "Search after DELETE - test flight excluded",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/flights/search?from=BOM&to=DEL&departureDate=2026-12-15" }
+    }
+  ]
+}
