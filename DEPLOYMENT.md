@@ -1,94 +1,174 @@
 # SkyBook Deployment
 
-## Local Docker Compose
+**Last verified:** 2026-10-28 (local Vite/Node/MariaDB path; Docker remains unverified)
 
-The Compose stack uses React/Vite served by Nginx, the existing Spring Boot API, and MariaDB 10.11. The browser calls same-origin `/api` paths; Nginx forwards them to the Compose service named `backend`. The API and database are not published on host ports. The frontend is available on `http://127.0.0.1:8081` by default.
+## Verified path vs unverified path
 
-The first start creates a new named MariaDB volume and initializes empty `flights`, `bookings`, and `seats` tables compatible with the project mappings. The application creates its `users`, `fare_watches`, and `notifications` tables. No existing records are copied. The local XAMPP database and `src/backend/skybook.db` are not used or modified. Do not use `docker compose down -v`; it deletes the Compose database volume.
+| Path | Status |
+|------|--------|
+| Local Vite frontend (`:5173`) + Node/Express backend (`:8080`) + repaired MariaDB copy (`:3307`) | **Verified:** tests, build, lint and browser flows passed |
+| Original host MariaDB (`:3306`) | **Blocked:** the original Aria tables are unrepaired; use the copy for testing until recovery is explicitly approved |
+| Docker Compose (`db` + `backend` + Nginx frontend) | **Not verified in this session:** the Docker daemon was unavailable. Compose files were reviewed, not executed |
 
-Run these commands from the repository root in PowerShell. Generate fresh local credentials instead of using the example placeholders:
+The verified deployment is the local/self-hosted Node + MySQL path described below. Do not claim the Compose stack is healthy without running it.
+
+## Authoritative application
+
+- Backend: `src/backend/server.js` (Express 5 + `mysql2`). This is the only backend used by the frontend.
+- Frontend: `src/` (React 19 + TypeScript + Vite). Production output is `dist/`.
+- Database: MySQL/MariaDB, database `skybook`.
+- Schema migrations: `src/backend/db-schema.js` runs an idempotent guard at server startup. It adds missing tables, columns and indexes and normalises the airport collation; it does not drop application data.
+- Airport catalogue: stored in the `airports` table (72 rows in the verified database) and served by `GET /api/airports`.
+- `backend-java/` is an unwired Spring Boot experiment. It is not part of the deployment.
+- `src/backend/skybook.db` is an unused SQLite leftover. The current server never reads it.
+
+## Environment variables
+
+Create `.env` from `.env.example`. Never commit real secrets.
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `MYSQL_HOST` | Yes | `127.0.0.1` for local host MariaDB; the Compose service name is `db` |
+| `MYSQL_PORT` | No | Default `3306` |
+| `MYSQL_DATABASE` | Yes | `skybook` |
+| `MYSQL_USER` / `MYSQL_PASSWORD` | Yes | Dedicated application user; do not use `root` in production |
+| `MYSQL_ROOT_PASSWORD` | Compose only | Used only by the MariaDB container |
+| `JWT_SECRET` | Yes | At least 32 random characters; production start fails otherwise |
+| `SKYBOOK_CORS_ALLOWED_ORIGINS` | Production | Comma-separated exact origins, e.g. `https://skybook.example.com` |
+| `APP_BASE_URL` | For reset links | Public frontend origin used in generated reset links |
+| `FARE_WATCH_INTERVAL_MINUTES` | No | Default `30`; uses database fares only |
+| `PORT` | No | Default `8080` |
+| `SKYBOOK_ADMIN_EMAIL` / `SKYBOOK_ADMIN_PASSWORD` | Production bootstrap / rotation | Production bootstrap only when no `admin@skybook.com` account exists; password must be 12+ characters. Also used by `set-admin-password.js` |
+| `SKYBOOK_DEV_ADMIN_PASSWORD` | Development only | Fallback for the local `admin@skybook.com` seed; default `Admin@123`. Never use a demo value in production |
+| `SKYBOOK_ALLOW_DEMO_ACCOUNTS` | Demo stacks only | Leave unset/false in production. Setting `true` permits the documented demo passwords |
+| `TRUST_PROXY` | Behind a reverse proxy | Set `1` only when a trusted proxy sets client IP headers |
+
+Production behaviour:
+
+- The server refuses to start if `JWT_SECRET` is missing, shorter than 32 characters, or the old built-in default.
+- The server refuses to start while `admin@skybook.com` or `demo@skybook.com` still uses its documented demo password, unless `SKYBOOK_ALLOW_DEMO_ACCOUNTS=true`.
+- If `SKYBOOK_CORS_ALLOWED_ORIGINS` is empty in production, cross-origin browser access is disabled (same-origin deployment through Nginx/Caddy is unaffected).
+- Auth endpoints use in-process rate limiting. This is per server process; use a shared store or proxy-level limiting for multi-instance deployments.
+
+## Local deployment (verified)
+
+Prerequisites: Node.js 20+, npm, MySQL/MariaDB running with a `skybook` database and application user.
 
 ```powershell
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-$bytes = New-Object byte[] 32
-$rng.GetBytes($bytes)
-$mysqlPassword = [BitConverter]::ToString($bytes).Replace('-', '')
-$rng.GetBytes($bytes)
-$rootPassword = [BitConverter]::ToString($bytes).Replace('-', '')
-$rng.GetBytes($bytes)
-$jwtSecret = [Convert]::ToBase64String($bytes)
-$rng.Dispose()
-@"
-MYSQL_DATABASE=skybook
-MYSQL_USER=skybook_app
-MYSQL_PASSWORD=$mysqlPassword
-MYSQL_ROOT_PASSWORD=$rootPassword
-JWT_SECRET=$jwtSecret
-SKYBOOK_CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-SKYBOOK_HTTP_PORT=8081
-VITE_API_URL=
-"@ | Set-Content -Encoding ascii .env
+cd D:\airline-reservation
+npm ci
+Copy-Item .env.example .env
+# Edit .env with real local values and a random 32+ character JWT_SECRET
 
+# Produce the production frontend bundle
+npm run build
+
+# Start the API (terminal 1)
+npm run dev:server
+
+# Start Vite dev server (terminal 2) or serve dist/ with any static host that proxies /api
+npm run dev
+```
+
+The Vite dev server proxies `/api` to `http://localhost:8080` (`vite.config.ts`). For a static production build, serve `dist/` and reverse-proxy `/api` to the Node backend on the same origin.
+
+Startup performs the schema guard and prints the database and CORS mode. Check:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/health
+```
+
+Expected shape: `{ ok: true, tables: 14, db: "mysql" }` (table count may grow with future migrations).
+
+To initialize or rotate the administrator password without editing source:
+
+```powershell
+$env:SKYBOOK_ADMIN_EMAIL="admin@skybook.com"
+$env:SKYBOOK_ADMIN_PASSWORD="Admin@123"   # development example; use a long unique value elsewhere
+node src/backend/set-admin-password.js --apply
+```
+
+### Data setup and maintenance
+
+```powershell
+node src/backend/seed-airports-flights.js   # core airports + schedule (idempotent)
+node src/backend/seed-network.js            # additional airports/routes (idempotent)
+node src/backend/extend-flights.js          # refresh the 30-day sample window
+```
+
+The live host database is the canonical dataset. The Docker `db_data` volume is separate. The current verification used a repaired copy on `:3307` because the original `:3306` Aria tables are unrepaired. Never copy a production dump over a database without a reviewed backup and restore test.
+
+### Tests before release
+
+```powershell
+node src/backend/api-test.js
+node src/backend/e2e-flow-test.js
+node src/backend/journey-verify.js
+node src/backend/extended-api-test.js
+node src/backend/integrity-check.js
+node src/backend/cleanup-test-data.js --apply
+npm run build
+npx eslint src
+```
+
+Latest verified results are recorded in `README.md` and `AI_PROGRESS.md`.
+
+## Docker Compose (reviewed, not verified this session)
+
+`compose.yaml` defines:
+
+1. `db`: MariaDB 10.11 with a named volume `db_data`; the SQL initializer runs only on a first, empty volume.
+2. `backend`: the Node API, `NODE_ENV=production`, waiting for a healthy database.
+3. `frontend`: Nginx serving the built frontend and proxying `/api`; published only on `127.0.0.1:8081` by default.
+
+Required `.env` values for Compose include `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `JWT_SECRET` and, for production, `SKYBOOK_CORS_ALLOWED_ORIGINS`. Compose now fails fast if `JWT_SECRET` is missing instead of falling back to a weak default.
+
+Because the initializer seeds the demo accounts, a production-mode Compose start will refuse to run until you either:
+
+- change the administrator and demo passwords and remove/disable the demo account, or
+- explicitly set `SKYBOOK_ALLOW_DEMO_ACCOUNTS=true` for a demo-only deployment.
+
+Commands (once Docker is available):
+
+```powershell
 docker compose config --quiet
 docker compose build
 docker compose up -d
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:8081/api/health
-(Invoke-WebRequest http://127.0.0.1:8081/).StatusCode
-Invoke-RestMethod http://127.0.0.1:8081/api/flights
 ```
 
-The initial empty database returns an empty flights list; no demonstration flights, users, or seats are fabricated. Add records through the application/admin workflows or migrate a separately reviewed database backup. The SQL initializer only runs when MariaDB first initializes an empty volume.
+`docker compose down` keeps the database volume. `docker compose down -v` deletes it; never use `-v` on a volume holding data you need.
 
-Stop containers and retain their database data with:
+The Docker path was not executed in the final session. Treat it as an unverified deployment option until you run the commands above and test login, search, booking, cancellation and admin access.
 
-```powershell
-docker compose down
-```
+## Production hardening checklist
 
-For logs and service status use `docker compose logs -f` and `docker compose ps`. `docker compose down` retains the named database volume; `docker compose down -v` removes it.
+- [ ] Use a dedicated database user, not `root`; restrict network access to the database.
+- [ ] Set a unique `JWT_SECRET` of 32+ random characters in a secret manager.
+- [ ] Set `SKYBOOK_CORS_ALLOWED_ORIGINS` to the exact HTTPS origin(s).
+- [ ] Change/remove all demo accounts; keep `SKYBOOK_ALLOW_DEMO_ACCOUNTS` unset.
+- [ ] Put the app behind HTTPS (Caddy, Nginx, or a cloud load balancer).
+- [ ] Keep the database port and backend port off the public internet.
+- [ ] Configure encrypted, off-host database backups and test a restore.
+- [ ] Set `TRUST_PROXY=1` only if a trusted reverse proxy supplies client IPs; otherwise rate-limit at the proxy.
+- [ ] Use a shared rate-limit store or proxy rate limiting for multiple backend instances.
+- [ ] Configure an email provider before enabling password-reset delivery (currently not configured).
+- [ ] Integrate a payment provider before describing bookings as paid; the current system collects no money.
+- [ ] Replace sample fares/schedules with an authorized data source before real-world use.
+- [ ] Re-run the full test suite and a browser smoke test after every deployment.
 
-## GitHub
+## Cloud VPS notes
 
-There is no `.git` directory in the inspected workspace and Git was unavailable in the current terminal, so no repository history or remote could be checked or preserved. Install Git for Windows first. Review `git status` and confirm this directory is the intended source before initializing a repository. Create an empty private GitHub repository without a README, license, or `.gitignore`, then run from the project root:
+A small single-host VPS is sufficient for a demo or low-traffic deployment. The important constraints are the same as above:
 
-```powershell
-git init --initial-branch=main
-git status --short
-git check-ignore -v .env src/backend/.env src/backend/skybook.db
-git add .
-git diff --cached --check
-git diff --cached --name-only
-git commit -m "Prepare SkyBook deployment"
-git remote add origin https://github.com/<OWNER>/<REPOSITORY>.git
-git remote -v
-```
+- Publish only HTTPS (and SSH from your administrative IP).
+- Keep MariaDB and the Node API off public ports.
+- Use a domain and DNS A/AAAA records before provisioning certificates.
+- Store secrets only on the server/secret manager, never in Git.
+- Back up the database volume and logical dumps independently of the VM.
+- A single VM is not high availability; provider snapshots are not a substitute for tested database backups.
 
-Inspect the staged file list and ensure it contains no `.env`, database files, `node_modules`, or build outputs. Only after confirming the destination repository and staged contents, publish with:
+## Git
 
-```powershell
-git push -u origin main
-```
-
-Never use `git push --force` for this setup. `.env.example` contains placeholders only; keep real secrets in `.env` or the cloud platform's secret settings.
-
-## Cloud VPS Deployment
-
-A budget-compatible option for this existing Compose stack is a Hetzner Cloud Ubuntu VM. The current CPX22 regular-performance listing is 2 vCPU, 4 GB RAM, and 80 GB NVMe, listed at about EUR 11.99/month in EU locations or EUR 26.99/month in Singapore, before applicable taxes; prices and availability can change. The provider lists server backups as an add-on starting around EUR 1.20/month. Choose a region based on your users: Singapore is closer to South Asia, while EU regions are cheaper on the current listing. This is a shared-vCPU, single-host setup suitable for a small deployment, not high availability. Creating a server requires a provider account, any requested verification, and a valid payment method; review the final console price before confirming any purchase.
-
-The MariaDB volume is a Docker named volume on the VM disk and is never published as a port. Enable provider server backups, but also schedule encrypted MariaDB logical backups to separate off-host storage and test a restore. A server backup alone is not a database-aware backup strategy. Register or use a domain and create its DNS A record before HTTPS provisioning; domain registration is a separate possible cost.
-
-1. Create the VM and point a DNS A record for the application domain to its public IP. Allow inbound TCP 80 and 443 for the web proxy and SSH only from your administrative IP. Do not open ports 3306 or 8080.
-2. Install Docker Engine with the Compose plugin, clone the reviewed GitHub repository, and create a new `.env` on the VM. Use unique cloud-only values for `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and a cryptographically random `JWT_SECRET` of at least 32 bytes; do not copy local credentials. Set `SKYBOOK_CORS_ALLOWED_ORIGINS` to the exact HTTPS origin, for example `https://skybook.example.com` (add a second exact origin only if you serve both apex and `www`). Keep `MYSQL_DATABASE=skybook`, `SKYBOOK_HTTP_PORT=8081`, and `VITE_API_URL=`. The database host is the Compose service `db` and its internal port is `3306`; these must not be set to `localhost`.
-3. In the checkout, run `docker compose config --quiet` and `docker compose up -d --build`. Nginx is bound only to the VM loopback interface on port 8081; the API and database have no host port mappings.
-4. Install Caddy on the VM and configure the domain to proxy to the local frontend port:
-
-```text
-skybook.example.com {
-    reverse_proxy 127.0.0.1:8081
-}
-```
-
-Caddy can provision HTTPS after DNS and firewall access are correct. Verify `https://skybook.example.com/api/health` and the home page. Keep `.env` on the VM only and restrict its file permissions.
-
-The cloud database starts empty, just like local Compose. Before serving real users, migrate records only from a verified backup into the cloud database using a reviewed MariaDB-compatible procedure, then test login, flight search, bookings, and seat inventory. Do not commit database dumps or use the existing XAMPP database as a live cloud database. Back up the cloud database independently; deleting the VM also deletes its local named-volume data unless separately backed up.
+The workspace is a Git repository on `main`. No commit, push, reset or branch deletion was performed. Review `git status` and stage only the intended source, tests and documentation. Never stage `.env`, `node_modules`, `dist`, database dumps or `src/backend/skybook.db`. `.env.example` contains placeholders only.

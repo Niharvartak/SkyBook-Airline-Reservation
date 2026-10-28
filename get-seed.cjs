@@ -1,0 +1,10 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+const db = new Database(path.join(__dirname, 'src','backend','skybook.db'), { readonly: true });
+const flights = db.prepare("SELECT DISTINCT flightNumber, airline, origin, destination, departureTime, arrivalTime, price, status FROM flights WHERE isActive=1 ORDER BY flightNumber").all();
+const adminUser = db.prepare("SELECT u.id, u.name, u.email, u.passwordHash FROM users u JOIN admins a ON a.userId = u.id LIMIT 1").get();
+console.log('ADMIN_USER:', JSON.stringify(adminUser));
+console.log('UNIQUE_FLIGHTS:', flights.length);
+const sample = flights.slice(0, 3);
+console.log('SAMPLE:', JSON.stringify(sample, null, 2));
+db.close();

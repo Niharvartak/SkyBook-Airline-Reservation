@@ -1,7 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { apiFetch } from "./api";
 import { FeaturePage } from "./FeaturePages";
+import CustomerDashboard from "./CustomerDashboard";
+import AdminDashboard from "./AdminDashboard";
+import { ForgotPasswordPage, ResetPasswordPage } from "./AuthPages";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -21,6 +24,15 @@ type Flight = {
   price: number;
   status: string;
   availableSeats: number;
+  durationMinutes?: number | null;
+  stops?: number;
+  aircraft?: string | null;
+  baggageAllowance?: string | null;
+  cabinClasses?: string | null;
+  terminal?: string | null;
+  gate?: string | null;
+  baggageBelt?: string | null;
+  cabinPrices?: { Economy: number; Business: number };
 };
 
 type Notice = { type: "success" | "error" | "info"; text: string };
@@ -56,26 +68,6 @@ type Booking = {
   status: string; createdAt: string; flightId?: number;
 };
 
-type AdminBooking = {
-  id: number; pnr: string; passengerName: string;
-  origin?: string; destination?: string; totalPrice?: number;
-  status?: string; bookedByName?: string; reason?: string;
-};
-
-type AdminDashboard = {
-  stats: {
-    totalUsers: number; totalFlights: number; activeFlights: number;
-    totalBookings: number; totalCancellations: number; totalRevenue: number;
-    bookingStatusDistribution: Record<string, number>;
-  };
-  bookingTrend: { date: string; count: number }[];
-  revenueTrend: { date: string; revenue: number }[];
-  popularDestinations: { destination: string; bookingCount: number }[];
-  flights: (Flight & { isActive: boolean })[];
-  users: { id: number; name: string; email: string; role: string }[];
-  bookings: AdminBooking[];
-  cancellations: AdminBooking[];
-};
 
 type ChatMessage = { sender: "user" | "bot"; text: string; time: string };
 
@@ -91,27 +83,64 @@ type Destination = {
 function isAdminRole(role?: string | null) { return role?.toUpperCase() === "ADMIN"; }
 
 const ALL_AIRPORTS: Destination[] = [
-  { code: "BOM", city: "Mumbai", name: "Mumbai (BOM)", airport: "Chhatrapati Shivaji Maharaj International Airport", country: "India", region: "domestic", description: "India's financial capital", emoji: "🌊" },
-  { code: "DEL", city: "Delhi", name: "Delhi (DEL)", airport: "Indira Gandhi International Airport", country: "India", region: "domestic", description: "India's historic capital", emoji: "🏛️" },
-  { code: "BLR", city: "Bengaluru", name: "Bengaluru (BLR)", airport: "Kempegowda International Airport", country: "India", region: "domestic", description: "Silicon Valley of India", emoji: "🌿" },
-  { code: "HYD", city: "Hyderabad", name: "Hyderabad (HYD)", airport: "Rajiv Gandhi International Airport", country: "India", region: "domestic", description: "City of Nizams & tech", emoji: "🕌" },
-  { code: "MAA", city: "Chennai", name: "Chennai (MAA)", airport: "Chennai International Airport", country: "India", region: "domestic", description: "Gateway to South India", emoji: "🏖️" },
-  { code: "CCU", city: "Kolkata", name: "Kolkata (CCU)", airport: "Netaji Subhas Chandra Bose Int'l", country: "India", region: "domestic", description: "City of Joy", emoji: "🎭" },
-  { code: "PNQ", city: "Pune", name: "Pune (PNQ)", airport: "Pune International Airport", country: "India", region: "domestic", description: "Oxford of the East", emoji: "📚" },
-  { code: "GOI", city: "Goa", name: "Goa (GOI)", airport: "Dabolim Airport", country: "India", region: "domestic", description: "Beach paradise of India", emoji: "🌴" },
-  { code: "COK", city: "Kochi", name: "Kochi (COK)", airport: "Cochin International Airport", country: "India", region: "domestic", description: "Queen of the Arabian Sea", emoji: "🚢" },
-  { code: "AMD", city: "Ahmedabad", name: "Ahmedabad (AMD)", airport: "Sardar Vallabhbhai Patel Int'l", country: "India", region: "domestic", description: "Heritage city", emoji: "🏺" },
-  { code: "JAI", city: "Jaipur", name: "Jaipur (JAI)", airport: "Jaipur International Airport", country: "India", region: "domestic", description: "Pink City of royals", emoji: "🏰" },
-  { code: "LKO", city: "Lucknow", name: "Lucknow (LKO)", airport: "Chaudhary Charan Singh Int'l", country: "India", region: "domestic", description: "City of Nawabs", emoji: "🌹" },
-  { code: "SXR", city: "Srinagar", name: "Srinagar (SXR)", airport: "Sheikh ul-Alam International Airport", country: "India", region: "domestic", description: "Paradise on Earth", emoji: "🏔️" },
-  { code: "VNS", city: "Varanasi", name: "Varanasi (VNS)", airport: "Lal Bahadur Shastri Int'l", country: "India", region: "domestic", description: "Spiritual capital", emoji: "🕯️" },
-  { code: "DXB", city: "Dubai", name: "Dubai (DXB)", airport: "Dubai International Airport", country: "UAE", region: "international", description: "City of the future", emoji: "🏙️" },
-  { code: "SIN", city: "Singapore", name: "Singapore (SIN)", airport: "Changi Airport", country: "Singapore", region: "international", description: "Garden city & global hub", emoji: "✨" },
-  { code: "BKK", city: "Bangkok", name: "Bangkok (BKK)", airport: "Suvarnabhumi Airport", country: "Thailand", region: "international", description: "City of Angels", emoji: "🛕" },
-  { code: "LHR", city: "London", name: "London (LHR)", airport: "Heathrow Airport", country: "UK", region: "international", description: "Historic world capital", emoji: "💂" },
-  { code: "CDG", city: "Paris", name: "Paris (CDG)", airport: "Charles de Gaulle Airport", country: "France", region: "international", description: "City of love & culture", emoji: "🗼" },
-  { code: "KUL", city: "Kuala Lumpur", name: "Kuala Lumpur (KUL)", airport: "KLIA", country: "Malaysia", region: "international", description: "Twin Towers & culture", emoji: "🌆" },
-  { code: "JFK", city: "New York", name: "New York (JFK)", airport: "JFK International Airport", country: "USA", region: "international", description: "The city that never sleeps", emoji: "🗽" },
+  // ── Indian Domestic ────────────────────────────────────────────────────────
+  { code: "BOM", city: "Mumbai",              name: "Mumbai (BOM)",              airport: "Chhatrapati Shivaji Maharaj International Airport",  country: "India",       region: "domestic",      description: "India's financial capital",        emoji: "🌊" },
+  { code: "DEL", city: "Delhi",               name: "Delhi (DEL)",               airport: "Indira Gandhi International Airport",                 country: "India",       region: "domestic",      description: "India's historic capital",         emoji: "🏛️" },
+  { code: "BLR", city: "Bengaluru",           name: "Bengaluru (BLR)",           airport: "Kempegowda International Airport",                   country: "India",       region: "domestic",      description: "Silicon Valley of India",          emoji: "🌿" },
+  { code: "HYD", city: "Hyderabad",           name: "Hyderabad (HYD)",           airport: "Rajiv Gandhi International Airport",                 country: "India",       region: "domestic",      description: "City of Nizams & tech",            emoji: "🕌" },
+  { code: "MAA", city: "Chennai",             name: "Chennai (MAA)",             airport: "Chennai International Airport",                      country: "India",       region: "domestic",      description: "Gateway to South India",           emoji: "🏖️" },
+  { code: "CCU", city: "Kolkata",             name: "Kolkata (CCU)",             airport: "Netaji Subhas Chandra Bose Int'l",                   country: "India",       region: "domestic",      description: "City of Joy",                      emoji: "🎭" },
+  { code: "PNQ", city: "Pune",               name: "Pune (PNQ)",               airport: "Pune International Airport",                         country: "India",       region: "domestic",      description: "Oxford of the East",               emoji: "📚" },
+  { code: "AMD", city: "Ahmedabad",           name: "Ahmedabad (AMD)",           airport: "Sardar Vallabhbhai Patel Int'l",                     country: "India",       region: "domestic",      description: "Heritage city of Gujarat",         emoji: "🏺" },
+  { code: "GOI", city: "Goa",               name: "Goa (GOI)",               airport: "Goa International Airport (Dabolim)",                country: "India",       region: "domestic",      description: "Beach paradise of India",          emoji: "🌴" },
+  { code: "COK", city: "Kochi",               name: "Kochi (COK)",               airport: "Cochin International Airport",                       country: "India",       region: "domestic",      description: "Queen of the Arabian Sea",         emoji: "🚢" },
+  { code: "JAI", city: "Jaipur",             name: "Jaipur (JAI)",             airport: "Jaipur International Airport",                       country: "India",       region: "domestic",      description: "Pink City of royals",              emoji: "🏰" },
+  { code: "LKO", city: "Lucknow",             name: "Lucknow (LKO)",             airport: "Chaudhary Charan Singh Int'l",                       country: "India",       region: "domestic",      description: "City of Nawabs",                   emoji: "🌹" },
+  { code: "IXC", city: "Chandigarh",          name: "Chandigarh (IXC)",          airport: "Chandigarh Airport",                                 country: "India",       region: "domestic",      description: "City Beautiful",                   emoji: "🌄" },
+  { code: "IDR", city: "Indore",             name: "Indore (IDR)",             airport: "Devi Ahilyabai Holkar Airport",                      country: "India",       region: "domestic",      description: "Commercial capital of MP",         emoji: "🏙️" },
+  { code: "NAG", city: "Nagpur",             name: "Nagpur (NAG)",             airport: "Dr. Babasaheb Ambedkar Int'l",                       country: "India",       region: "domestic",      description: "Orange city, zero mile",           emoji: "🍊" },
+  { code: "SXR", city: "Srinagar",           name: "Srinagar (SXR)",           airport: "Sheikh ul-Alam International Airport",               country: "India",       region: "domestic",      description: "Paradise on Earth",                emoji: "🏔️" },
+  { code: "VNS", city: "Varanasi",           name: "Varanasi (VNS)",           airport: "Lal Bahadur Shastri Int'l",                          country: "India",       region: "domestic",      description: "Spiritual capital",                emoji: "🕯️" },
+  { code: "BBI", city: "Bhubaneswar",         name: "Bhubaneswar (BBI)",         airport: "Biju Patnaik International Airport",                 country: "India",       region: "domestic",      description: "Temple city of Odisha",            emoji: "🛕" },
+  { code: "GAU", city: "Guwahati",           name: "Guwahati (GAU)",           airport: "Lokpriya Gopinath Bordoloi Int'l",                   country: "India",       region: "domestic",      description: "Gateway to North-East India",      emoji: "🌿" },
+  { code: "PAT", city: "Patna",               name: "Patna (PAT)",               airport: "Jay Prakash Narayan Int'l",                          country: "India",       region: "domestic",      description: "Ancient city on the Ganga",        emoji: "🌊" },
+  { code: "CJB", city: "Coimbatore",          name: "Coimbatore (CJB)",          airport: "Coimbatore International Airport",                   country: "India",       region: "domestic",      description: "Manchester of South India",        emoji: "🏭" },
+  { code: "TRV", city: "Thiruvananthapuram",  name: "Thiruvananthapuram (TRV)",  airport: "Trivandrum International Airport",                   country: "India",       region: "domestic",      description: "Capital of Kerala",                emoji: "🚀" },
+  { code: "IXE", city: "Mangaluru",           name: "Mangaluru (IXE)",           airport: "Mangaluru International Airport",                    country: "India",       region: "domestic",      description: "Coastal Karnataka gateway",        emoji: "☕" },
+  { code: "VTZ", city: "Visakhapatnam",       name: "Visakhapatnam (VTZ)",       airport: "Visakhapatnam Airport",                              country: "India",       region: "domestic",      description: "Jewel of the east coast",          emoji: "⚓" },
+  { code: "ATQ", city: "Amritsar",           name: "Amritsar (ATQ)",           airport: "Sri Guru Ram Dass Jee Int'l",                        country: "India",       region: "domestic",      description: "City of the Golden Temple",        emoji: "✨" },
+  { code: "DED", city: "Dehradun",           name: "Dehradun (DED)",           airport: "Jolly Grant Airport",                                country: "India",       region: "domestic",      description: "Gateway to Uttarakhand hills",     emoji: "🏔️" },
+  { code: "IXR", city: "Ranchi",             name: "Ranchi (IXR)",             airport: "Birsa Munda Airport",                                country: "India",       region: "domestic",      description: "Capital of Jharkhand",             emoji: "💦" },
+  { code: "RPR", city: "Raipur",             name: "Raipur (RPR)",             airport: "Swami Vivekananda Airport",                          country: "India",       region: "domestic",      description: "Capital of Chhattisgarh",          emoji: "🌾" },
+  { code: "STV", city: "Surat",               name: "Surat (STV)",               airport: "Surat Airport",                                      country: "India",       region: "domestic",      description: "Diamond city of India",            emoji: "💎" },
+  { code: "BDQ", city: "Vadodara",           name: "Vadodara (BDQ)",           airport: "Vadodara Airport",                                   country: "India",       region: "domestic",      description: "Cultural capital of Gujarat",      emoji: "🎨" },
+  // ── International ─────────────────────────────────────────────────────────
+  { code: "DXB", city: "Dubai",               name: "Dubai (DXB)",               airport: "Dubai International Airport",                        country: "UAE",         region: "international", description: "City of the future",               emoji: "🏙️" },
+  { code: "AUH", city: "Abu Dhabi",           name: "Abu Dhabi (AUH)",           airport: "Abu Dhabi International Airport",                    country: "UAE",         region: "international", description: "Capital of UAE",                   emoji: "🏎️" },
+  { code: "SIN", city: "Singapore",           name: "Singapore (SIN)",           airport: "Singapore Changi Airport",                          country: "Singapore",   region: "international", description: "Garden city & global hub",         emoji: "✨" },
+  { code: "BKK", city: "Bangkok",             name: "Bangkok (BKK)",             airport: "Suvarnabhumi Airport",                               country: "Thailand",    region: "international", description: "City of Angels",                   emoji: "🛕" },
+  { code: "KUL", city: "Kuala Lumpur",        name: "Kuala Lumpur (KUL)",        airport: "Kuala Lumpur International Airport",                 country: "Malaysia",    region: "international", description: "Twin Towers & culture",            emoji: "🌆" },
+  { code: "LHR", city: "London",             name: "London (LHR)",             airport: "Heathrow Airport",                                   country: "UK",          region: "international", description: "Historic world capital",           emoji: "💂" },
+  { code: "CDG", city: "Paris",               name: "Paris (CDG)",               airport: "Charles de Gaulle Airport",                          country: "France",      region: "international", description: "City of love & culture",           emoji: "🗼" },
+  { code: "JFK", city: "New York",           name: "New York (JFK)",           airport: "JFK International Airport",                         country: "USA",         region: "international", description: "The city that never sleeps",       emoji: "🗽" },
+  { code: "FRA", city: "Frankfurt",           name: "Frankfurt (FRA)",           airport: "Frankfurt Airport",                                  country: "Germany",     region: "international", description: "Financial hub of Europe",          emoji: "🏦" },
+  { code: "DOH", city: "Doha",               name: "Doha (DOH)",               airport: "Hamad International Airport",                        country: "Qatar",       region: "international", description: "World Cup city",                   emoji: "⚽" },
+  { code: "MCT", city: "Muscat",             name: "Muscat (MCT)",             airport: "Muscat International Airport",                       country: "Oman",        region: "international", description: "Capital of Sultanate of Oman",     emoji: "🏛️" },
+  { code: "CMB", city: "Colombo",             name: "Colombo (CMB)",             airport: "Bandaranaike International Airport",                 country: "Sri Lanka",   region: "international", description: "Pearl of Indian Ocean",            emoji: "💎" },
+  { code: "KTM", city: "Kathmandu",           name: "Kathmandu (KTM)",           airport: "Tribhuvan International Airport",                    country: "Nepal",       region: "international", description: "Gateway to the Himalayas",         emoji: "🏔️" },
+  { code: "MLE", city: "Male",               name: "Male (MLE)",               airport: "Velana International Airport",                       country: "Maldives",    region: "international", description: "Tropical paradise",                emoji: "🏖️" },
+  { code: "HKG", city: "Hong Kong",           name: "Hong Kong (HKG)",           airport: "Hong Kong International Airport",                    country: "Hong Kong",   region: "international", description: "Asia's world city",               emoji: "🌃" },
+  { code: "HND", city: "Tokyo",               name: "Tokyo (HND)",               airport: "Tokyo Haneda Airport",                               country: "Japan",       region: "international", description: "Land of rising sun",               emoji: "🗻" },
+  { code: "ICN", city: "Seoul",               name: "Seoul (ICN)",               airport: "Incheon International Airport",                      country: "South Korea", region: "international", description: "K-pop capital & tech hub",         emoji: "🎵" },
+  { code: "IST", city: "Istanbul",           name: "Istanbul (IST)",           airport: "Istanbul Airport",                                   country: "Turkey",      region: "international", description: "Bridge between East & West",       emoji: "🕌" },
+  { code: "ZRH", city: "Zurich",             name: "Zurich (ZRH)",             airport: "Zurich Airport",                                     country: "Switzerland", region: "international", description: "Alpine city & banking hub",        emoji: "🏔️" },
+  { code: "AMS", city: "Amsterdam",           name: "Amsterdam (AMS)",           airport: "Amsterdam Schiphol Airport",                         country: "Netherlands", region: "international", description: "City of canals & art",             emoji: "🌷" },
+  { code: "JED", city: "Jeddah",             name: "Jeddah (JED)",             airport: "King Abdulaziz International Airport",               country: "Saudi Arabia", region: "international", description: "Gateway to Makkah",               emoji: "🕌" },
+  { code: "RUH", city: "Riyadh",             name: "Riyadh (RUH)",             airport: "King Khalid International Airport",                  country: "Saudi Arabia", region: "international", description: "Capital of Saudi Arabia",          emoji: "🏙️" },
+  { code: "MRU", city: "Mauritius",           name: "Mauritius (MRU)",           airport: "Sir Seewoosagur Ramgoolam Int'l",                    country: "Mauritius",   region: "international", description: "Island paradise",                  emoji: "🌊" },
+  { code: "PER", city: "Perth",               name: "Perth (PER)",               airport: "Perth Airport",                                      country: "Australia",   region: "international", description: "Sunniest Australian city",         emoji: "☀️" },
+  { code: "SYD", city: "Sydney",             name: "Sydney (SYD)",             airport: "Sydney Kingsford Smith Airport",                     country: "Australia",   region: "international", description: "Opera House city",                 emoji: "🎭" },
+  { code: "MEL", city: "Melbourne",           name: "Melbourne (MEL)",           airport: "Melbourne Airport",                                  country: "Australia",   region: "international", description: "Cultural capital of Australia",     emoji: "☕" },
 ];
 
 const FEATURED_DESTINATIONS: Destination[] = [
@@ -123,6 +152,10 @@ const FEATURED_DESTINATIONS: Destination[] = [
   ALL_AIRPORTS.find(a => a.code === "JAI")!,
   ALL_AIRPORTS.find(a => a.code === "BKK")!,
   ALL_AIRPORTS.find(a => a.code === "COK")!,
+  ALL_AIRPORTS.find(a => a.code === "MLE")!,
+  ALL_AIRPORTS.find(a => a.code === "KTM")!,
+  ALL_AIRPORTS.find(a => a.code === "ATQ")!,
+  ALL_AIRPORTS.find(a => a.code === "AMS")!,
 ];
 
 const DEST_IMAGES: Record<string, string> = {
@@ -142,18 +175,32 @@ const DEST_IMAGES: Record<string, string> = {
   JFK: "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=800&q=80",
   HYD: "https://images.unsplash.com/photo-1572203611340-de23f90cf4ec?auto=format&fit=crop&w=800&q=80",
   CCU: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=800&q=80",
+  MLE: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=800&q=80",
+  KTM: "https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=800&q=80",
+  ATQ: "https://images.unsplash.com/photo-1591793855449-2aaad9b0ebb8?auto=format&fit=crop&w=800&q=80",
+  AMS: "https://images.unsplash.com/photo-1534351590666-13e3e96b5017?auto=format&fit=crop&w=800&q=80",
+  IST: "https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?auto=format&fit=crop&w=800&q=80",
+  SYD: "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?auto=format&fit=crop&w=800&q=80",
+  HKG: "https://images.unsplash.com/photo-1536599018102-9f803c140fc1?auto=format&fit=crop&w=800&q=80",
+  MCT: "https://images.unsplash.com/photo-1580894908361-967195033215?auto=format&fit=crop&w=800&q=80",
+  DOH: "https://images.unsplash.com/photo-1609154807519-f88c5b873a7a?auto=format&fit=crop&w=800&q=80",
+  KUL: "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?auto=format&fit=crop&w=800&q=80",
 };
 
 const initialDepartureDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 const initialReturnDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
-const initialAdminRangeEnd = new Date().toISOString().slice(0, 10);
-const initialAdminRangeStart = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+
+// Detect if a flight is international based on airport codes in origin/destination strings
+function isInternationalFlight(origin: string, destination: string): boolean {
+  const INTL_CODES = /\b(DXB|AUH|SIN|BKK|KUL|LHR|CDG|JFK|FRA|DOH|MCT|CMB|KTM|MLE|HKG|HND|ICN|IST|ZRH|AMS|JED|RUH|MRU|PER|SYD|MEL)\b/;
+  return INTL_CODES.test(`${origin} ${destination}`.toUpperCase());
+}
 
 function previewTotal(price: number, count: number, promoCode: string, flight?: Flight | null) {
   const base = price * count;
   const code = promoCode.trim().toUpperCase();
   if (!code || !flight) return { totalPrice: base, discount: 0 };
-  const intl = /DXB|SIN|BKK|LHR|CDG|KUL|JFK|DUBAI|SINGAPORE|LONDON|PARIS|KUALA|NEW YORK|BANGKOK/i.test(`${flight.origin} ${flight.destination}`);
+  const intl = isInternationalFlight(flight.origin, flight.destination);
   if (code === "FLYINDIA" && !intl) return { totalPrice: Math.max(0, base - Math.round(base * 0.3)), discount: Math.round(base * 0.3) };
   if (code === "WELCOME") { const d = Math.min(1000, base); return { totalPrice: Math.max(0, base - d), discount: d }; }
   if (code === "WORLD20" && intl) return { totalPrice: Math.max(0, base - Math.round(base * 0.2)), discount: Math.round(base * 0.2) };
@@ -166,6 +213,18 @@ function navigate(path: string) {
 }
 
 function formatPrice(v: number) { return `₹${v.toLocaleString("en-IN")}`; }
+function formatDateLabel(value?: string | null) {
+  if (!value) return "—";
+  const raw = String(value).slice(0, 10);
+  const parsed = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function todayInputValue() {
+  const now = new Date();
+  const pad = (v: number) => String(v).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 function getCode(loc: string) { const m = loc.match(/\(([^)]+)\)/); return m ? m[1] : loc.slice(0, 3).toUpperCase(); }
 function getCity(loc: string) { return loc.replace(/\s*\([^)]*\)\s*/g, "").trim(); }
 
@@ -174,7 +233,8 @@ function calcDuration(dep: string, arr: string): string {
   const toMin = (t: string) => {
     const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
     if (!m) return 0;
-    let h = parseInt(m[1]), min = parseInt(m[2]);
+    let h = parseInt(m[1]);
+    const min = parseInt(m[2]);
     if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
     if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
     return h * 60 + min;
@@ -183,332 +243,6 @@ function calcDuration(dep: string, arr: string): string {
   if (diff < 0) diff += 24 * 60;
   const h = Math.floor(diff / 60), min = diff % 60;
   return min > 0 ? `${h}h ${min}m` : `${h}h`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ADMIN PANEL
-// ─────────────────────────────────────────────────────────────────────────────
-
-function AdminPanel({ currentUser, token, setCurrentUser, setToken, route }: {
-  currentUser: { id: number; name: string; email: string; role?: string } | null;
-  token: string | null;
-  setCurrentUser: React.Dispatch<React.SetStateAction<{ id: number; name: string; email: string; role?: string } | null>>;
-  setToken: React.Dispatch<React.SetStateAction<string | null>>;
-  route: string;
-}) {
-  const isAuth = isAdminRole(currentUser?.role) && !!token;
-  const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [rangeStart, setRangeStart] = useState(initialAdminRangeStart);
-  const [rangeEnd, setRangeEnd] = useState(initialAdminRangeEnd);
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [loginNotice, setLoginNotice] = useState<Notice | null>(null);
-  const [flightForm, setFlightForm] = useState({
-    flightNumber: "SK-999", airline: "SkyBook Airlines", origin: "Mumbai (BOM)", destination: "Delhi (DEL)",
-    departureDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10), departureTime: "08:00 AM", arrivalTime: "10:15 AM", price: "4999", status: "On Time",
-  });
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (route === "/admin" && !token) navigate("/admin/login");
-    if (route === "/admin" && token && currentUser && !isAdminRole(currentUser.role)) navigate("/admin/login");
-  }, [route, token, currentUser]);
-
-  const loadDashboard = useCallback(async () => {
-    if (!token) return;
-    try {
-      const params = new URLSearchParams({ startDate: rangeStart, endDate: rangeEnd });
-      const data = await apiFetch(`/api/admin/dashboard?${params}`, {}, true);
-      setDashboard(data);
-      setNotice(null);
-    } catch (e) {
-      setNotice({ type: "error", text: e instanceof Error ? e.message : "Unable to load dashboard." });
-    } finally { setLoading(false); }
-  }, [token, rangeStart, rangeEnd]);
-
-  useEffect(() => {
-    if (route === "/admin" && isAuth) { setLoading(true); loadDashboard(); }
-  }, [route, isAuth, loadDashboard]);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setLoginNotice({ type: "info", text: "Signing in…" });
-      const data = await apiFetch("/api/auth/login", { method: "POST", body: JSON.stringify(loginForm) });
-      if (!isAdminRole(data.user?.role)) throw new Error("This account does not have admin access.");
-      localStorage.setItem("skybook-token", data.token);
-      setToken(data.token);
-      setCurrentUser(data.user);
-      setLoginNotice({ type: "success", text: "Admin login successful." });
-      navigate("/admin");
-    } catch (e) { setLoginNotice({ type: "error", text: e instanceof Error ? e.message : "Login failed." }); }
-  };
-
-  const handleCreateFlight = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setSubmitting(true);
-      await apiFetch("/api/admin/flights", { method: "POST", body: JSON.stringify({ ...flightForm, price: Number(flightForm.price) }) }, true);
-      setNotice({ type: "success", text: "Flight created successfully." });
-      await loadDashboard();
-    } catch (e) { setNotice({ type: "error", text: e instanceof Error ? e.message : "Unable to create flight." }); }
-    finally { setSubmitting(false); }
-  };
-
-  const handleDeactivate = async (id: number) => {
-    try {
-      await apiFetch(`/api/admin/flights/${id}`, { method: "DELETE" }, true);
-      setNotice({ type: "success", text: "Flight deactivated." });
-      await loadDashboard();
-    } catch (e) { setNotice({ type: "error", text: e instanceof Error ? e.message : "Unable to deactivate." }); }
-  };
-
-  if (route === "/admin/login") {
-    return (
-      <div className="admin-shell">
-        <div className="admin-login-card">
-          <div className="admin-login-logo"><span>✈</span>SkyBook</div>
-          <div className="admin-login-header">
-            <span className="admin-badge">ADMIN PORTAL</span>
-            <h2>Secure Admin Access</h2>
-            <p>Sign in with your administrator credentials to manage the SkyBook platform.</p>
-          </div>
-          <form className="admin-login-form" onSubmit={handleLogin}>
-            <label htmlFor="admin-email">Admin Email
-              <input id="admin-email" type="email" placeholder="admin@skybook.com" value={loginForm.email} onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))} required />
-            </label>
-            <label htmlFor="admin-pwd">Password
-              <input id="admin-pwd" type="password" placeholder="Enter password" value={loginForm.password} onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))} required />
-            </label>
-            {loginNotice && <div className={`state-box ${loginNotice.type}`}><span className="state-icon">{loginNotice.type === "success" ? "✓" : loginNotice.type === "error" ? "⚠" : "ℹ"}</span>{loginNotice.text}</div>}
-            <button type="submit" className="primary-btn admin-login-btn">Sign In to Admin Panel</button>
-          </form>
-          <div className="admin-login-footer">
-            <p className="admin-login-hint">Demo: <code>admin@skybook.com</code> / <code>password</code></p>
-            <button type="button" className="text-btn" onClick={() => navigate("/")}>← Back to SkyBook</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (route === "/admin" && !isAuth) return null;
-
-  return (
-    <div className="admin-shell">
-      <header className="admin-topbar">
-        <div className="admin-topbar-left">
-          <div className="admin-topbar-logo"><span>✈</span>SkyBook</div>
-          <div>
-            <span className="admin-badge">OPERATIONS DASHBOARD</span>
-            <h1>Admin Panel</h1>
-          </div>
-        </div>
-        <div className="admin-actions">
-          <button type="button" className="secondary-btn" onClick={() => navigate("/")}>← Public Site</button>
-          <button type="button" className="cancel-booking-btn" onClick={() => { localStorage.removeItem("skybook-token"); setToken(null); setCurrentUser(null); navigate("/admin/login"); }}>Sign Out</button>
-        </div>
-      </header>
-
-      <div className="admin-layout">
-        <aside className="admin-sidebar">
-          <div className="admin-user-box">
-            <div className="admin-user-avatar">{currentUser?.name?.[0] || "A"}</div>
-            <div>
-              <strong>{currentUser?.name || "Admin"}</strong>
-              <small>{currentUser?.email}</small>
-              <span className="admin-role-chip">ADMIN</span>
-            </div>
-          </div>
-          <nav className="admin-nav">
-            <button type="button" className="admin-nav-item active">📊 Overview</button>
-            <button type="button" className="admin-nav-item" onClick={() => document.querySelector(".admin-flights-section")?.scrollIntoView({ behavior: "smooth" })}>✈ Flights</button>
-            <button type="button" className="admin-nav-item" onClick={() => document.querySelector(".admin-bookings-section")?.scrollIntoView({ behavior: "smooth" })}>🎫 Bookings</button>
-            <button type="button" className="admin-nav-item" onClick={() => document.querySelector(".admin-users-section")?.scrollIntoView({ behavior: "smooth" })}>👥 Users</button>
-          </nav>
-        </aside>
-
-        <main className="admin-content">
-          {notice && <div className={`state-box ${notice.type}`}><span className="state-icon">{notice.type === "success" ? "✓" : notice.type === "error" ? "⚠" : "ℹ"}</span>{notice.text}</div>}
-
-          {loading ? (
-            <div className="admin-loading"><div className="loading-spinner"></div><p>Loading dashboard…</p></div>
-          ) : dashboard ? (
-            <>
-              {/* Stats Grid */}
-              <section className="admin-stats-grid">
-                {[
-                  { label: "Total Users", value: dashboard.stats.totalUsers, icon: "👥" },
-                  { label: "Active Flights", value: dashboard.stats.activeFlights, icon: "✈" },
-                  { label: "Total Bookings", value: dashboard.stats.totalBookings, icon: "🎫" },
-                  { label: "Cancellations", value: dashboard.stats.totalCancellations, icon: "❌" },
-                  { label: "Booking Value", value: formatPrice(dashboard.stats.totalRevenue), icon: "₹" },
-                  { label: "Total Flights", value: dashboard.stats.totalFlights, icon: "🛫" },
-                ].map(s => (
-                  <div className="admin-stat-card" key={s.label}>
-                    <div className="admin-stat-icon">{s.icon}</div>
-                    <div>
-                      <span className="admin-stat-label">{s.label}</span>
-                      <strong className="admin-stat-value">{s.value}</strong>
-                    </div>
-                  </div>
-                ))}
-              </section>
-
-              {/* Date Range Filter */}
-              <section className="admin-date-filter">
-                <div className="admin-date-filter-inner">
-                  <label>From <input type="date" value={rangeStart} max={rangeEnd} onChange={e => { setLoading(true); setRangeStart(e.target.value); }} /></label>
-                  <label>Through <input type="date" value={rangeEnd} min={rangeStart} max={initialAdminRangeEnd} onChange={e => { setLoading(true); setRangeEnd(e.target.value); }} /></label>
-                  <button type="button" className="secondary-btn" onClick={loadDashboard}>Refresh</button>
-                </div>
-                <p className="admin-disclaimer">Booking value reflects confirmed reservations. Payment collection is not integrated.</p>
-              </section>
-
-              {/* Charts */}
-              <section className="admin-analytics-grid">
-                <article className="admin-card admin-chart-card">
-                  <div className="admin-card-header"><h3>📈 Booking Trend</h3></div>
-                  <div className="admin-bar-chart">
-                    {dashboard.bookingTrend.map(p => {
-                      const max = Math.max(1, ...dashboard.bookingTrend.map(x => Number(x.count)));
-                      return (
-                        <div className="admin-chart-column" key={p.date} title={`${p.date}: ${p.count} bookings`}>
-                          <span style={{ height: `${Math.max(4, (Number(p.count) / max) * 100)}%` }} />
-                          <small>{String(p.date).slice(5)}</small>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-                <article className="admin-card admin-chart-card">
-                  <div className="admin-card-header"><h3>💰 Revenue Trend</h3></div>
-                  <div className="admin-bar-chart">
-                    {dashboard.revenueTrend.map(p => {
-                      const max = Math.max(1, ...dashboard.revenueTrend.map(x => Number(x.revenue)));
-                      return (
-                        <div className="admin-chart-column revenue" key={p.date} title={`${p.date}: ${formatPrice(Number(p.revenue))}`}>
-                          <span style={{ height: `${Math.max(4, (Number(p.revenue) / max) * 100)}%` }} />
-                          <small>{String(p.date).slice(5)}</small>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-                <article className="admin-card">
-                  <div className="admin-card-header"><h3>🎯 Booking Status</h3></div>
-                  <div className="admin-status-list">
-                    {Object.entries(dashboard.stats.bookingStatusDistribution || {}).map(([s, c]) => (
-                      <div className="admin-status-row" key={s}><span className={`admin-status-dot status-${s.toLowerCase()}`}></span><span>{s}</span><strong>{String(c)}</strong></div>
-                    ))}
-                  </div>
-                </article>
-                <article className="admin-card">
-                  <div className="admin-card-header"><h3>🌍 Top Destinations</h3></div>
-                  <div className="admin-destination-list">
-                    {dashboard.popularDestinations.length === 0
-                      ? <p className="admin-empty-state">No booking data yet.</p>
-                      : dashboard.popularDestinations.map(d => (
-                        <div className="admin-destination-row" key={d.destination}>
-                          <span>{d.destination}</span>
-                          <strong>{d.bookingCount} booking{d.bookingCount !== 1 ? "s" : ""}</strong>
-                        </div>
-                      ))}
-                  </div>
-                </article>
-              </section>
-
-              {/* Create Flight */}
-              <section className="admin-card admin-flights-section">
-                <div className="admin-card-header"><h3>✈ Create New Flight</h3></div>
-                <form onSubmit={handleCreateFlight} className="admin-flight-form">
-                  <div className="admin-form-grid">
-                    <label>Flight No.<input value={flightForm.flightNumber} onChange={e => setFlightForm(p => ({ ...p, flightNumber: e.target.value }))} placeholder="SK-999" required /></label>
-                    <label>Airline<input value={flightForm.airline} onChange={e => setFlightForm(p => ({ ...p, airline: e.target.value }))} placeholder="SkyBook Airlines" /></label>
-                    <label>Origin<input value={flightForm.origin} onChange={e => setFlightForm(p => ({ ...p, origin: e.target.value }))} placeholder="Mumbai (BOM)" required /></label>
-                    <label>Destination<input value={flightForm.destination} onChange={e => setFlightForm(p => ({ ...p, destination: e.target.value }))} placeholder="Delhi (DEL)" required /></label>
-                    <label>Date<input type="date" value={flightForm.departureDate} onChange={e => setFlightForm(p => ({ ...p, departureDate: e.target.value }))} required /></label>
-                    <label>Departure<input value={flightForm.departureTime} onChange={e => setFlightForm(p => ({ ...p, departureTime: e.target.value }))} placeholder="08:00 AM" /></label>
-                    <label>Arrival<input value={flightForm.arrivalTime} onChange={e => setFlightForm(p => ({ ...p, arrivalTime: e.target.value }))} placeholder="10:15 AM" /></label>
-                    <label>Price (₹)<input type="number" value={flightForm.price} onChange={e => setFlightForm(p => ({ ...p, price: e.target.value }))} placeholder="4999" /></label>
-                  </div>
-                  <button type="submit" className="primary-btn" disabled={submitting}>{submitting ? "Creating…" : "Create Flight"}</button>
-                </form>
-              </section>
-
-              {/* Flights Table */}
-              <section className="admin-card">
-                <div className="admin-card-header"><h3>✈ All Flights</h3></div>
-                <div className="admin-table-wrap">
-                  <table className="admin-table">
-                    <thead><tr><th>Flight</th><th>Route</th><th>Date & Time</th><th>Price</th><th>Seats</th><th>Status</th><th>Action</th></tr></thead>
-                    <tbody>
-                      {dashboard.flights.map(f => (
-                        <tr key={f.id} className={!f.isActive ? "row-inactive" : ""}>
-                          <td><strong>{f.flightNumber}</strong><br /><small>{f.airline}</small></td>
-                          <td>{f.origin}<br />→ {f.destination}</td>
-                          <td>{f.departureDate}<br /><small>{f.departureTime}</small></td>
-                          <td>{formatPrice(f.price)}</td>
-                          <td>{f.availableSeats}</td>
-                          <td><span className={`status-chip ${f.isActive ? "chip-active" : "chip-inactive"}`}>{f.isActive ? f.status : "Inactive"}</span></td>
-                          <td>{f.isActive && <button type="button" className="cancel-booking-btn" onClick={() => handleDeactivate(f.id)}>Deactivate</button>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              {/* Users */}
-              <section className="admin-card admin-users-section">
-                <div className="admin-card-header"><h3>👥 Users</h3></div>
-                <div className="admin-table-wrap">
-                  <table className="admin-table">
-                    <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Joined</th></tr></thead>
-                    <tbody>
-                      {dashboard.users.map(u => (
-                        <tr key={u.id}>
-                          <td>{u.id}</td>
-                          <td>{u.name}</td>
-                          <td>{u.email}</td>
-                          <td><span className={`role-chip ${u.role === "ADMIN" ? "chip-admin" : "chip-user"}`}>{u.role}</span></td>
-                          <td><small>{(u as Record<string, unknown>).createdAt ? String((u as Record<string, unknown>).createdAt).slice(0, 10) : "—"}</small></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              {/* Bookings */}
-              <section className="admin-card admin-bookings-section">
-                <div className="admin-card-header"><h3>🎫 Bookings</h3></div>
-                <div className="admin-table-wrap">
-                  <table className="admin-table">
-                    <thead><tr><th>PNR</th><th>Passenger</th><th>Route</th><th>Amount</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {dashboard.bookings.map(b => (
-                        <tr key={b.id}>
-                          <td><code>{b.pnr}</code></td>
-                          <td>{b.passengerName}</td>
-                          <td>{b.origin} → {b.destination}</td>
-                          <td>{formatPrice(Number(b.totalPrice || 0))}</td>
-                          <td><span className={`status-chip ${b.status === "CONFIRMED" ? "chip-confirmed" : "chip-cancelled"}`}>{b.status}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </>
-          ) : (
-            <div className="admin-empty-state">No dashboard data available.</div>
-          )}
-        </main>
-      </div>
-    </div>
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,6 +294,7 @@ function App() {
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [promoCode, setPromoCode] = useState("");
+  const [cabinClass, setCabinClass] = useState<"Economy" | "Business">("Economy");
 
   // Loading state
   const [isSearching, setIsSearching] = useState(false);
@@ -581,6 +316,8 @@ function App() {
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [myBookingsLoading, setMyBookingsLoading] = useState(() => Boolean(localStorage.getItem("skybook-token")));
   const [myBookingsError, setMyBookingsError] = useState<string | null>(null);
+  const [pnrQuery, setPnrQuery] = useState("");
+  const [pnrLookupError, setPnrLookupError] = useState<string | null>(null);
   const [bookingsReloadKey, setBookingsReloadKey] = useState(0);
   const [pendingBooking, setPendingBooking] = useState(false);
 
@@ -602,6 +339,8 @@ function App() {
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Destination search / airport suggestions
+  // The database catalogue is authoritative; the bundled list is an offline fallback.
+  const [airportCatalogue, setAirportCatalogue] = useState<Destination[]>(ALL_AIRPORTS);
   const [fromSuggestOpen, setFromSuggestOpen] = useState(false);
   const [toSuggestOpen, setToSuggestOpen] = useState(false);
   const [fromQuery, setFromQuery] = useState("Mumbai (BOM)");
@@ -611,7 +350,8 @@ function App() {
 
   // Derived
   const travelerCount = Math.max(1, parseInt(travelers, 10) || 1);
-  const { totalPrice: quotedTotal, discount: quotedDiscount } = previewTotal(selectedFlight?.price || 0, travelerCount, promoCode, selectedFlight);
+  const farePerTraveller = Math.round((selectedFlight?.price || 0) * (cabinClass === "Business" ? 2.5 : 1));
+  const { totalPrice: quotedTotal, discount: quotedDiscount } = previewTotal(farePerTraveller, travelerCount, promoCode, selectedFlight);
 
   // ── Side effects ─────────────────────────────────────────────────────────
 
@@ -627,6 +367,19 @@ function App() {
       .then(d => { setCurrentUser(d.user); if (d.user?.email) setContactEmail(prev => prev || d.user.email); })
       .catch(() => { localStorage.removeItem("skybook-token"); setToken(null); setCurrentUser(null); });
   }, [token]);
+
+  // Load the shared airport catalogue from the authoritative API.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/airports")
+      .then(d => {
+        if (!cancelled && Array.isArray(d.airports) && d.airports.length > 0) {
+          setAirportCatalogue(d.airports);
+        }
+      })
+      .catch(() => { /* keep the bundled fallback when offline */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -652,11 +405,11 @@ function App() {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  const filteredFromAirports = ALL_AIRPORTS.filter(a =>
+  const filteredFromAirports = airportCatalogue.filter(a =>
     fromQuery.length < 2 || a.name.toLowerCase().includes(fromQuery.toLowerCase()) || a.city.toLowerCase().includes(fromQuery.toLowerCase()) || a.code.toLowerCase().includes(fromQuery.toLowerCase())
   ).slice(0, 8);
 
-  const filteredToAirports = ALL_AIRPORTS.filter(a =>
+  const filteredToAirports = airportCatalogue.filter(a =>
     (toQuery.length < 2 || a.name.toLowerCase().includes(toQuery.toLowerCase()) || a.city.toLowerCase().includes(toQuery.toLowerCase()) || a.code.toLowerCase().includes(toQuery.toLowerCase())) &&
     a.name !== from
   ).slice(0, 8);
@@ -728,6 +481,7 @@ function App() {
       setIsLoadingDetails(true);
       if (isReturn) setSelectedReturnFlight(flight); else setSelectedFlight(flight);
       setSelectedSeats([]);
+      setCabinClass("Economy");
       setBookingNotice(null);
       const data = await apiFetch(`/api/flights/${flight.id}`);
       setFlightDetails(data.flight);
@@ -741,6 +495,11 @@ function App() {
     if (!flightDetails) return;
     const seat = flightDetails.seats.find(s => s.seatNumber === seatNumber);
     if (!seat || seat.status !== "available") return;
+    const seatCabin = String(seat.cabinClass || (Number(seat.row) <= 2 ? "Business" : "Economy"));
+    if (seatCabin.toLowerCase() !== cabinClass.toLowerCase()) {
+      setBookingNotice({ type: "info", text: `Seat ${seatNumber} is in ${seatCabin}. Switch cabin class or pick a ${cabinClass} seat.` });
+      return;
+    }
     if (selectedSeats.includes(seatNumber)) {
       setSelectedSeats(prev => prev.filter(s => s !== seatNumber));
       return;
@@ -766,11 +525,12 @@ function App() {
       const data = await apiFetch("/api/bookings", {
         method: "POST",
         body: JSON.stringify({
-          flightId: selectedFlight.id, travelDate: selectedFlight.departureDate,
+          flightId: selectedFlight.id, travelDate: String(selectedFlight.departureDate).slice(0, 10),
           passengerName: passengerDetails.map(p => `${p.title} ${p.name}`.trim()).join(", "),
           passengers: JSON.stringify(passengerDetails),
           contactEmail: contactEmail.trim(), contactPhone: contactPhone.trim(),
           seatNumbers: selectedSeats, travelers: travelerCount,
+          cabinClass,
           promoCode: promoCode.trim().toUpperCase() || undefined,
         }),
       }, true);
@@ -852,6 +612,15 @@ function App() {
     } catch (e) { setBookingNotice({ type: "error", text: e instanceof Error ? e.message : "Unable to cancel booking." }); }
   };
 
+  const handlePnrLookup = () => {
+    const q = pnrQuery.trim().toUpperCase();
+    if (!q) { setPnrLookupError("Enter a booking reference (PNR) to search."); return; }
+    const match = myBookings.find(b => b.pnr.toUpperCase() === q) || myBookings.find(b => b.pnr.toUpperCase().includes(q));
+    if (!match) { setPnrLookupError(`No booking found for “${q}”. Check the reference and try again.`); return; }
+    setPnrLookupError(null);
+    setTicketModalBooking(match);
+  };
+
   const handleDestinationClick = (dest: Destination) => {
     setTo(dest.name);
     setToQuery(dest.name);
@@ -888,7 +657,35 @@ function App() {
   // ── Routing ───────────────────────────────────────────────────────────────
 
   if (route.startsWith("/admin")) {
-    return <AdminPanel currentUser={currentUser} token={token} setCurrentUser={setCurrentUser} setToken={setToken} route={route} />;
+    return (
+      <AdminDashboard
+        currentUser={currentUser}
+        token={token}
+        setCurrentUser={setCurrentUser}
+        setToken={setToken}
+        onNavigate={navigate}
+      />
+    );
+  }
+
+  if (route === "/forgot-password") {
+    return <ForgotPasswordPage onNavigate={navigate} />;
+  }
+
+  if (route === "/reset-password") {
+    return <ResetPasswordPage onNavigate={navigate} />;
+  }
+
+  if (route === "/dashboard") {
+    return (
+      <CustomerDashboard
+        currentUser={currentUser}
+        token={token}
+        setCurrentUser={setCurrentUser}
+        setToken={setToken}
+        onNavigate={navigate}
+      />
+    );
   }
 
   if (route === "/login" || route === "/register") {
@@ -919,9 +716,14 @@ function App() {
             {authNotice && <div className={`state-box ${authNotice.type}`}><span className="state-icon">{authNotice.type === "success" ? "✓" : authNotice.type === "error" ? "⚠" : "ℹ"}</span>{authNotice.text}</div>}
             <button className="primary-btn auth-submit" type="submit">{isReg ? "Create account" : "Sign in"}</button>
             {!isReg && (
-              <button type="button" className="auth-demo-btn" onClick={() => setAuthForm({ name: "", email: "demo@skybook.com", password: "password" })}>
-                Use demo account
-              </button>
+              <>
+                <button type="button" className="auth-demo-btn" onClick={() => setAuthForm({ name: "", email: "demo@skybook.com", password: "demo123" })}>
+                  Use demo account
+                </button>
+                <button type="button" className="text-btn auth-forgot-link" onClick={() => navigate("/forgot-password")}>
+                  Forgot password?
+                </button>
+              </>
             )}
           </form>
           <p className="auth-route-switch">
@@ -933,7 +735,7 @@ function App() {
     );
   }
 
-  if (["/flight-status", "/dashboard", "/planner", "/fare-watches", "/notifications"].includes(route)) {
+  if (["/flight-status", "/planner", "/fare-watches", "/notifications"].includes(route)) {
     return <FeaturePage route={route} token={token} onNavigate={navigate} onBookFlight={async (rec, tc) => {
       const f: Flight = { id: rec.flightId, flightNumber: rec.flightNumber, airline: rec.airline, origin: rec.origin, destination: rec.destination, departureDate: rec.departureDate, departureTime: rec.departureTime, arrivalTime: rec.arrivalTime, price: Number(rec.pricePerPerson), status: rec.status, availableSeats: rec.availableSeats };
       setFrom(f.origin); setFromQuery(f.origin);
@@ -976,6 +778,9 @@ function App() {
             <a href="/login" role="menuitem" className="nav-auth-link" onClick={e => { e.preventDefault(); setMobileMenuOpen(false); navigate("/login"); }}>Login</a>
             <a href="/register" role="menuitem" className="nav-auth-link nav-register-link" onClick={e => { e.preventDefault(); setMobileMenuOpen(false); navigate("/register"); }}>Register</a>
           </>}
+          {currentUser && (
+            <button type="button" className="nav-mobile-signout" role="menuitem" onClick={() => { setMobileMenuOpen(false); localStorage.removeItem("skybook-token"); setToken(null); setCurrentUser(null); setMyBookings([]); setPendingBooking(false); }}>Sign Out</button>
+          )}
         </div>
 
         <div className="nav-buttons">
@@ -1138,7 +943,7 @@ function App() {
               <label htmlFor="dep-date">DEPARTURE</label>
               <div className="autocomplete-input-wrap">
                 <span className="input-icon" aria-hidden="true">📅</span>
-                <input id="dep-date" type="date" className="search-input" min={new Date().toISOString().slice(0, 10)} value={departureDate} onChange={e => setDepartureDate(e.target.value)} />
+                <input id="dep-date" type="date" className="search-input" min={todayInputValue()} value={departureDate} onChange={e => setDepartureDate(e.target.value)} />
               </div>
             </div>
 
@@ -1171,7 +976,11 @@ function App() {
           {/* Quick popular chips */}
           <div className="quick-airports" aria-label="Quick destination selection">
             <span className="quick-label">Popular:</span>
-            {["Goa (GOI)", "Dubai (DXB)", "Bengaluru (BLR)", "Singapore (SIN)", "Srinagar (SXR)"].map(dest => (
+            {[
+              "Goa (GOI)", "Dubai (DXB)", "Bengaluru (BLR)", "Singapore (SIN)", "Srinagar (SXR)",
+              "Male (MLE)", "Bangkok (BKK)", "Jaipur (JAI)", "Kochi (COK)", "Amritsar (ATQ)",
+              "Kathmandu (KTM)", "Mumbai (BOM)", "Delhi (DEL)", "Hyderabad (HYD)", "Amsterdam (AMS)",
+            ].map(dest => (
               <button key={dest} type="button" className="quick-chip" onClick={() => { setTo(dest); setToQuery(dest); }}>
                 {dest.split(" (")[0]}
               </button>
@@ -1194,12 +1003,14 @@ function App() {
           <div className="section-center">
             <span className="section-eyebrow">AVAILABLE FLIGHTS</span>
             <h2 id="results-heading">Outbound: {getCity(from)} → {getCity(to)}</h2>
-            <p>Direct flights departing on {departureDate} · Simulated schedule data</p>
+            <p>Direct flights departing on {formatDateLabel(departureDate)} · Simulated schedule data</p>
           </div>
           <div className="results-grid">
             {searchResults.map(f => {
               const sel = selectedFlight?.id === f.id;
-              const dur = calcDuration(f.departureTime, f.arrivalTime);
+              const dur = f.durationMinutes
+                ? `${Math.floor(f.durationMinutes / 60)}h${f.durationMinutes % 60 ? ` ${f.durationMinutes % 60}m` : ""}`
+                : calcDuration(f.departureTime, f.arrivalTime);
               return (
                 <article key={f.id} className={`result-card ${sel ? "selected-card" : ""}`} aria-selected={sel}>
                   <div className="result-airline-row">
@@ -1222,7 +1033,7 @@ function App() {
                     <div className="route-graphic">
                       <small className="route-duration">{dur}</small>
                       <div className="route-line-visual"><span className="route-plane" aria-hidden="true">✈</span></div>
-                      <small className="route-type">Direct</small>
+                      <small className="route-type">{f.stops ? `${f.stops} stop${f.stops > 1 ? "s" : ""}` : "Direct"}</small>
                     </div>
                     <div className="route-terminal">
                       <strong className="iata-code">{getCode(f.destination)}</strong>
@@ -1231,10 +1042,15 @@ function App() {
                     </div>
                   </div>
 
+                  <div className="result-flight-facts">
+                    <span>✈ {f.aircraft || "Aircraft TBA"}</span>
+                    <span>🧳 {f.baggageAllowance || "Baggage TBA"}</span>
+                  </div>
+
                   <div className="result-meta-row">
                     <div className="result-meta-item">
                       <small>Date</small>
-                      <span>{f.departureDate}</span>
+                      <span>{formatDateLabel(f.departureDate)}</span>
                     </div>
                     <div className="result-meta-item">
                       <small>Seats Left</small>
@@ -1287,8 +1103,12 @@ function App() {
                     <div className="route-graphic"><small className="route-duration">{calcDuration(f.departureTime, f.arrivalTime)}</small><div className="route-line-visual"><span className="route-plane" aria-hidden="true">✈</span></div><small className="route-type">Direct</small></div>
                     <div className="route-terminal"><strong className="iata-code">{getCode(f.destination)}</strong><small>{getCity(f.destination)}</small><span className="route-time">{f.arrivalTime}</span></div>
                   </div>
+                  <div className="result-flight-facts">
+                    <span>✈ {f.aircraft || "Aircraft TBA"}</span>
+                    <span>🧳 {f.baggageAllowance || "Baggage TBA"}</span>
+                  </div>
                   <div className="result-meta-row">
-                    <div className="result-meta-item"><small>Return Date</small><span>{f.departureDate}</span></div>
+                    <div className="result-meta-item"><small>Return Date</small><span>{formatDateLabel(f.departureDate)}</span></div>
                     <div className="result-meta-item"><small>Seats</small><span className={f.availableSeats < 10 ? "low-seats" : ""}>{f.availableSeats}</span></div>
                     <div className="result-price"><small>per person</small><strong className="fare-tag">{formatPrice(f.price)}</strong></div>
                   </div>
@@ -1314,7 +1134,7 @@ function App() {
             <div className="summary-tags" role="list">
               <span className="tag-pill tag-flight" role="listitem">✈ {flightDetails.flightNumber}</span>
               <span className="tag-pill tag-route" role="listitem">{flightDetails.origin} → {flightDetails.destination}</span>
-              <span className="tag-pill tag-date" role="listitem">{flightDetails.departureDate}</span>
+              <span className="tag-pill tag-date" role="listitem">{formatDateLabel(flightDetails.departureDate)}</span>
               <span className="tag-pill tag-time" role="listitem">{flightDetails.departureTime}</span>
             </div>
           </div>
@@ -1340,47 +1160,60 @@ function App() {
               </div>
 
               <div className="cabin-container">
-                <div className="cabin-aisle-headers" aria-hidden="true">
-                  <span className="col-label">A</span>
-                  <span className="col-label">B</span>
-                  <span className="aisle-spacer">AISLE</span>
-                  <span className="col-label">C</span>
-                  <span className="col-label">D</span>
-                </div>
-                <div className="cabin-rows" role="grid" aria-label="Seat map">
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map(row => {
-                    const rowSeats = flightDetails.seats.filter(s => parseInt(s.seatNumber.replace(/\D/g, ""), 10) === row);
+                {(() => {
+                  const seats = flightDetails.seats || [];
+                  const cols = Array.from(new Set(seats.map(s => s.seatNumber.replace(/\d/g, "")))).filter(Boolean).sort();
+                  const rows = Array.from(new Set(seats.map(s => parseInt(s.seatNumber.replace(/\D/g, ""), 10)))).filter(n => Number.isFinite(n)).sort((a, b) => a - b);
+                  const layoutCols = cols.length ? cols : ["A", "B", "C", "D"];
+                  const layoutRows = rows.length ? rows : [1, 2, 3, 4, 5, 6, 7, 8];
+                  const mid = Math.ceil(layoutCols.length / 2);
+                  const leftCols = layoutCols.slice(0, mid);
+                  const rightCols = layoutCols.slice(mid);
+                  const renderSeat = (row: number, col: string) => {
+                    const seat = seats.find(s => s.seatNumber === `${col}${row}`);
+                    if (!seat) return <div className="seat-empty" key={`${col}${row}-empty`} aria-hidden="true" />;
+                    const booked = seat.status === "booked";
+                    const sel = selectedSeats.includes(seat.seatNumber);
                     const isBiz = row <= 2;
-                    const renderSeat = (col: string) => {
-                      const seat = rowSeats.find(s => s.seatNumber.startsWith(col));
-                      if (!seat) return <div className="seat-empty" key={`${col}${row}-empty`} aria-hidden="true" />;
-                      const booked = seat.status === "booked";
-                      const sel = selectedSeats.includes(seat.seatNumber);
-                      return (
-                        <button
-                          key={seat.seatNumber}
-                          type="button"
-                          role="gridcell"
-                          className={`cabin-seat${booked ? " booked" : ""}${sel ? " selected" : ""}${isBiz ? " biz-seat" : ""}`}
-                          disabled={booked}
-                          aria-label={`Seat ${seat.seatNumber} — ${booked ? "Booked" : sel ? "Selected" : "Available"}${isBiz ? " (Business)" : ""}`}
-                          onClick={() => handleSeatToggle(seat.seatNumber)}
-                        >
-                          <span className="seat-num">{seat.seatNumber}</span>
-                          {sel && <span className="seat-check" aria-hidden="true">✓</span>}
-                        </button>
-                      );
-                    };
                     return (
-                      <div key={`row-${row}`} className={`cabin-row${isBiz ? " business-row" : ""}`} role="row" aria-label={`Row ${row}${isBiz ? " (Business)" : ""}`}>
-                        <div className="row-badge">Row {row}{isBiz && <span className="biz-badge">Biz</span>}</div>
-                        <div className="row-side left-side">{renderSeat("A")}{renderSeat("B")}</div>
-                        <div className="cabin-center-aisle" aria-hidden="true"></div>
-                        <div className="row-side right-side">{renderSeat("C")}{renderSeat("D")}</div>
-                      </div>
+                      <button
+                        key={seat.seatNumber}
+                        type="button"
+                        role="gridcell"
+                        className={`cabin-seat${booked ? " booked" : ""}${sel ? " selected" : ""}${isBiz ? " biz-seat" : ""}`}
+                        disabled={booked}
+                        aria-label={`Seat ${seat.seatNumber} — ${booked ? "Booked" : sel ? "Selected" : "Available"}${isBiz ? " (Business)" : ""}`}
+                        onClick={() => handleSeatToggle(seat.seatNumber)}
+                      >
+                        <span className="seat-num">{seat.seatNumber}</span>
+                        {sel && <span className="seat-check" aria-hidden="true">✓</span>}
+                      </button>
                     );
-                  })}
-                </div>
+                  };
+                  return (
+                    <>
+                      <div className="cabin-aisle-headers" aria-hidden="true">
+                        <span className="row-badge-spacer"></span>
+                        <span className="row-side">{leftCols.map(c => <span key={c} className="col-label">{c}</span>)}</span>
+                        <span className="aisle-spacer">AISLE</span>
+                        <span className="row-side">{rightCols.map(c => <span key={c} className="col-label">{c}</span>)}</span>
+                      </div>
+                      <div className={`cabin-rows${layoutRows.length > 10 ? " many-rows" : ""}`} role="grid" aria-label="Seat map">
+                        {layoutRows.map(row => {
+                          const isBiz = row <= 2;
+                          return (
+                            <div key={`row-${row}`} className={`cabin-row${isBiz ? " business-row" : ""}`} role="row" aria-label={`Row ${row}${isBiz ? " (Business)" : ""}`}>
+                              <div className="row-badge">Row {row}{isBiz && <span className="biz-badge">Biz</span>}</div>
+                              <div className="row-side left-side">{leftCols.map(c => renderSeat(row, c))}</div>
+                              <div className="cabin-center-aisle" aria-hidden="true"></div>
+                              <div className="row-side right-side">{rightCols.map(c => renderSeat(row, c))}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {selectedSeats.length > 0 && (
@@ -1396,6 +1229,33 @@ function App() {
                 <div className="form-heading">
                   <h3>Passenger Information</h3>
                   <p>Names must match government-issued ID</p>
+                </div>
+
+                <div className="cabin-choice" role="radiogroup" aria-label="Cabin class">
+                  <span className="cabin-choice-label">Cabin class</span>
+                  <div className="cabin-choice-options">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={cabinClass === "Economy"}
+                      className={cabinClass === "Economy" ? "active" : ""}
+                      onClick={() => { setCabinClass("Economy"); setSelectedSeats([]); }}
+                    >
+                      <strong>Economy</strong>
+                      <small>{formatPrice(selectedFlight.price)} / traveller</small>
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={cabinClass === "Business"}
+                      className={cabinClass === "Business" ? "active" : ""}
+                      onClick={() => { setCabinClass("Business"); setSelectedSeats([]); }}
+                    >
+                      <strong>Business</strong>
+                      <small>{formatPrice(Math.round(selectedFlight.price * 2.5))} / traveller</small>
+                    </button>
+                  </div>
+                  <small className="cabin-note">Business seats are in rows 1–2. Changing cabin clears your seat selection.</small>
                 </div>
 
                 {passengerDetails.map((p, i) => (
@@ -1439,7 +1299,7 @@ function App() {
                 </div>
 
                 <div className="fare-summary-card" role="region" aria-label="Fare breakdown">
-                  <div className="fare-line"><span>Base fare ({travelerCount} × {formatPrice(selectedFlight.price)})</span><span>{formatPrice(selectedFlight.price * travelerCount)}</span></div>
+                  <div className="fare-line"><span>Base fare ({travelerCount} × {formatPrice(farePerTraveller)} · {cabinClass})</span><span>{formatPrice(farePerTraveller * travelerCount)}</span></div>
                   <div className="fare-line"><span>Taxes & fees</span><span>₹0 (Included)</span></div>
                   {quotedDiscount > 0 && <div className="fare-line discount-row"><span>Promo discount ({promoCode.toUpperCase()})</span><span className="discount-value">−{formatPrice(quotedDiscount)}</span></div>}
                   <div className="fare-line total-row"><span>Total Amount Due</span><strong className="grand-total">{formatPrice(quotedTotal)}</strong></div>
@@ -1494,6 +1354,23 @@ function App() {
             </div>
           ) : (
             <div className="bookings-list">
+              <div className="pnr-lookup-bar">
+                <label htmlFor="pnr-lookup">Retrieve a booking by PNR</label>
+                <div className="pnr-lookup-controls">
+                  <input
+                    id="pnr-lookup"
+                    type="text"
+                    className="pnr-lookup-input"
+                    placeholder="e.g. SKB-AB12CD"
+                    value={pnrQuery}
+                    autoComplete="off"
+                    onChange={e => { setPnrQuery(e.target.value); setPnrLookupError(null); }}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handlePnrLookup(); } }}
+                  />
+                  <button type="button" className="primary-btn" onClick={handlePnrLookup}>Find Booking</button>
+                </div>
+                {pnrLookupError && <p className="pnr-lookup-error" role="alert">{pnrLookupError}</p>}
+              </div>
               {myBookings.map(b => (
                 <article key={b.id} className="booking-card" aria-label={`Booking ${b.pnr}`}>
                   <div className="booking-card-header">
@@ -1506,7 +1383,7 @@ function App() {
                   <div className="booking-card-body">
                     <div><small>Flight</small><p>{b.flightNumber} · {b.airline}</p></div>
                     <div><small>Route</small><p>{b.origin} → {b.destination}</p></div>
-                    <div><small>Date & Time</small><p>{b.departureDate} · {b.departureTime}</p></div>
+                    <div><small>Date & Time</small><p>{formatDateLabel(b.departureDate)} · {b.departureTime}</p></div>
                     <div><small>Passenger(s)</small><p>{b.passengerName}</p></div>
                     <div><small>Seat(s)</small><p className="seat-tags-inline">{(b.seatNumbers || []).map(s => <span key={s} className="seat-badge-chip">{s}</span>)}</p></div>
                     <div><small>Booking Total</small><p className="fare-tag">{formatPrice(b.totalPrice)}</p></div>
@@ -1656,7 +1533,7 @@ function App() {
                   <div><strong className="iata-lg">{getCode(statusResult.destination)}</strong><small>{getCity(statusResult.destination)}</small><span>{statusResult.arrivalTime}</span></div>
                 </div>
                 <div className="status-meta-pills">
-                  <span>📅 {statusResult.departureDate}</span>
+                  <span>📅 {formatDateLabel(statusResult.departureDate)}</span>
                   <span>🚪 Terminal: {statusResult.terminal || "N/A"}</span>
                   <span>Gate: {statusResult.gate || "N/A"}</span>
                   <span>🧳 Belt: {statusResult.baggageBelt || "N/A"}</span>
@@ -1790,7 +1667,7 @@ function App() {
             <div className="boarding-pass-card">
               <div className="bp-top-row">
                 <div><small>FLIGHT</small><h3>{ticketModalBooking.flightNumber}</h3></div>
-                <div><small>DATE</small><h3>{ticketModalBooking.departureDate}</h3></div>
+                <div><small>DATE</small><h3>{formatDateLabel(ticketModalBooking.departureDate)}</h3></div>
                 <div><small>DEPARTS</small><h3>{ticketModalBooking.departureTime}</h3></div>
                 <div><small>STATUS</small><h3 className={ticketModalBooking.status === "CONFIRMED" ? "text-success" : "text-error"}>{ticketModalBooking.status}</h3></div>
               </div>
@@ -1851,7 +1728,7 @@ function App() {
             <ol className="demo-steps">
               {[
                 { title: "Search Flights", desc: "Enter origin, destination, dates, and traveler count. Browse results from 20+ destinations across India and internationally." },
-                { title: "Select Your Seat", desc: "Choose window or aisle on our interactive aircraft cabin map. Business rows 1–2, economy rows 3–8." },
+                { title: "Select Your Seat", desc: "Choose window or aisle on our interactive aircraft cabin map. Business class rows 1–2, economy rows behind them." },
                 { title: "Apply Promo & Confirm", desc: "Use FLYINDIA, WELCOME, or WORLD20 promo codes. Get an instant PNR booking reference." },
                 { title: "Manage Bookings", desc: "View, print, or cancel reservations from My Bookings. Use Fare Watch to track price changes." },
               ].map((s, i) => (

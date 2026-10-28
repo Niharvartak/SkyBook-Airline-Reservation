@@ -16,7 +16,15 @@ export async function apiFetch(path: string, options: RequestInit = {}, withAuth
   const contentType = response.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await response.json() : await response.text();
 
-  if (response.status === 401) {
+  // A rejected login is not an expired session. Only emit the global
+  // unauthorized event for authenticated requests so a bad password stays
+  // on the sign-in screen (including the dedicated admin sign-in).
+  const isAuthAttempt = path.startsWith("/api/auth/login")
+    || path.startsWith("/api/admin/login")
+    || path.startsWith("/api/auth/register")
+    || path.startsWith("/api/auth/forgot-password")
+    || path.startsWith("/api/auth/reset-password");
+  if (response.status === 401 && !isAuthAttempt) {
     localStorage.removeItem("skybook-token");
     window.dispatchEvent(new CustomEvent("skybook:unauthorized"));
   }

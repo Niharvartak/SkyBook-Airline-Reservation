@@ -8,6 +8,7 @@
     "dev:server": "node src/backend/server.js",
     "dev:all": "concurrently -k -n \"frontend,backend\" -c \"blue,green\" \"npm run dev\" \"npm run dev:server\"",
     "start": "concurrently -k -n \"frontend,backend\" -c \"blue,green\" \"npm run dev\" \"npm run dev:server\"",
+    "admin:set-password": "node src/backend/set-admin-password.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
