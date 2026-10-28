@@ -9,6 +9,10 @@
  * and is not started by any script in this repository.
  */
 const bcrypt = require("bcryptjs");
+const fs = require("fs");
+const path = require("path");
+const mysql = require("mysql2/promise");
+const { buildDbConfig } = require("./db-config");
 
 // ─── Shared airport catalogue (single source for DB + seed script) ───────────
 // `name` is the display form stored in flights.origin/destination.
@@ -138,7 +142,42 @@ async function addIndex(pool, table, index, definition) {
   console.log(`  ➕ index ${table}.${index}`);
 }
 
+async function ensureBaseSchema(pool) {
+  if (await tableExists(pool, "users")) return;
+
+  const schemaPath = path.join(__dirname, "../../database/skybook.sql");
+  if (!fs.existsSync(schemaPath)) {
+    throw new Error(`Base schema file not found: ${schemaPath}`);
+  }
+
+  // The Docker initializer uses this file directly. Managed MySQL providers
+  // (Aiven, PlanetScale-compatible services, etc.) start empty, so bootstrap
+  // the base tables once from the same reviewed schema. CREATE DATABASE/USE
+  // are removed because managed databases already select the target database
+  // and normally do not grant CREATE DATABASE privileges.
+  const baseSql = fs.readFileSync(schemaPath, "utf8")
+    .replace(/^\s*CREATE\s+DATABASE\b[\s\S]*?;\s*/im, "")
+    .replace(/^\s*USE\s+[^;]+;\s*/im, "");
+
+  console.log("  🗄️  Empty database detected — creating SkyBook base schema.");
+  const connection = await mysql.createConnection(buildDbConfig({ multipleStatements: true }));
+  try {
+    await connection.query(baseSql);
+  } finally {
+    await connection.end();
+  }
+
+  if (!(await tableExists(pool, "users"))) {
+    throw new Error("Base schema initialization did not create the users table.");
+  }
+  console.log("  ✅ Base schema created.");
+}
+
 async function ensureSchema(pool) {
+  // Managed databases may start with no tables. Create the base schema before
+  // any extension table that has a foreign key to users.
+  await ensureBaseSchema(pool);
+
   // ── New tables ─────────────────────────────────────────────────────────────
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_settings (

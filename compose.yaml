@@ -2,6 +2,9 @@ services:
   db:
     image: mariadb:10.11
     restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-skybook}
@@ -24,31 +27,42 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     restart: unless-stopped
+    init: true
     depends_on:
       db:
         condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: "8080"
+      HOST: 0.0.0.0
+      SERVE_FRONTEND: "false"
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (at least 32 random characters)}
       MYSQL_HOST: db
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: ${MYSQL_DATABASE:-skybook}
       MYSQL_USER: ${MYSQL_USER:-skybook_app}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_SSL: ${MYSQL_SSL:-false}
+      MYSQL_SSL_CA: ${MYSQL_SSL_CA:-}
+      MYSQL_SSL_CA_BASE64: ${MYSQL_SSL_CA_BASE64:-}
+      MYSQL_SSL_REJECT_UNAUTHORIZED: ${MYSQL_SSL_REJECT_UNAUTHORIZED:-true}
       SKYBOOK_CORS_ALLOWED_ORIGINS: ${SKYBOOK_CORS_ALLOWED_ORIGINS:-}
       APP_BASE_URL: ${APP_BASE_URL:-}
       FARE_WATCH_INTERVAL_MINUTES: ${FARE_WATCH_INTERVAL_MINUTES:-30}
       TRUST_PROXY: ${TRUST_PROXY:-0}
-      SKYBOOK_ADMIN_EMAIL: ${SKYBOOK_ADMIN_EMAIL:-}
-      SKYBOOK_ADMIN_PASSWORD: ${SKYBOOK_ADMIN_PASSWORD:-}
+      # Required in production. The entrypoint rotates the seeded admin before
+      # the API starts, so the documented development password is never used.
+      SKYBOOK_ADMIN_EMAIL: ${SKYBOOK_ADMIN_EMAIL:-admin@skybook.com}
+      SKYBOOK_ADMIN_PASSWORD: ${SKYBOOK_ADMIN_PASSWORD:?set SKYBOOK_ADMIN_PASSWORD in .env (12+ characters)}
+      # Optional. Leave empty to disable the seeded demo customer.
+      SKYBOOK_DEMO_PASSWORD: ${SKYBOOK_DEMO_PASSWORD:-}
       SKYBOOK_ALLOW_DEMO_ACCOUNTS: ${SKYBOOK_ALLOW_DEMO_ACCOUNTS:-false}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 15s
+      start_period: 60s
 
   frontend:
     build:
@@ -57,8 +71,11 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:-}
     restart: unless-stopped
+    init: true
     ports:
-      - "127.0.0.1:${SKYBOOK_HTTP_PORT:-8081}:80"
+      # Bind to localhost by default. Set SKYBOOK_BIND_ADDRESS=0.0.0.0 only on
+      # a server where the host firewall/HTTPS proxy is configured.
+      - "${SKYBOOK_BIND_ADDRESS:-127.0.0.1}:${SKYBOOK_HTTP_PORT:-8081}:80"
     depends_on:
       backend:
         condition: service_healthy

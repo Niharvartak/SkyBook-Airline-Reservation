@@ -717,9 +717,11 @@ function App() {
             <button className="primary-btn auth-submit" type="submit">{isReg ? "Create account" : "Sign in"}</button>
             {!isReg && (
               <>
-                <button type="button" className="auth-demo-btn" onClick={() => setAuthForm({ name: "", email: "demo@skybook.com", password: "demo123" })}>
-                  Use demo account
-                </button>
+                {import.meta.env.DEV && (
+                  <button type="button" className="auth-demo-btn" onClick={() => setAuthForm({ name: "", email: "demo@skybook.com", password: "demo123" })}>
+                    Use demo account
+                  </button>
+                )}
                 <button type="button" className="text-btn auth-forgot-link" onClick={() => navigate("/forgot-password")}>
                   Forgot password?
                 </button>

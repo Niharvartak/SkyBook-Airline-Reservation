@@ -41,7 +41,7 @@ npm run dev:server     # API only, port 8080
 npm run dev            # Vite only, port 5173
 ```
 
-The backend reads the project-root `.env` first. `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `JWT_SECRET`, `SKYBOOK_CORS_ALLOWED_ORIGINS`, `APP_BASE_URL` and `FARE_WATCH_INTERVAL_MINUTES` are the supported variables (see `.env.example`).
+The backend reads the project-root `.env` first. `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_SSL` (plus optional CA settings), `JWT_SECRET`, `SKYBOOK_CORS_ALLOWED_ORIGINS`, `APP_BASE_URL`, `FARE_WATCH_INTERVAL_MINUTES` and the Docker-only `SKYBOOK_ADMIN_*` bootstrap variables are supported (see `.env.example`).
 
 ### Seed and maintain sample data
 
@@ -171,8 +171,34 @@ database/skybook.sql      # base schema + demo seed for the Docker initializer
 compose.yaml              # optional db + API + Nginx stack
 ```
 
-## Docker Compose (optional)
+## Docker Compose (local / self-hosted)
 
-`compose.yaml` defines MariaDB, the Node backend and an Nginx frontend. It uses a **separate** `db_data` volume; it never touches the host MariaDB database. Set `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `JWT_SECRET` and `SKYBOOK_CORS_ALLOWED_ORIGINS` in the root `.env` before starting. Production mode now rejects the documented demo passwords unless `SKYBOOK_ALLOW_DEMO_ACCOUNTS=true` is set. `docker compose down -v` deletes the container database volume; never run it against data you need.
+`compose.yaml` defines MariaDB, the Node backend and an Nginx frontend. It uses a **separate** `db_data` volume; it never touches the host MariaDB database.
 
-See `DEPLOYMENT.md` for the full deployment checklist and the current verification caveat.
+1. Copy `.env.example` to `.env` and replace every placeholder.
+2. Set `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `JWT_SECRET` and a **new** `SKYBOOK_ADMIN_PASSWORD` (12+ characters). Leave `SKYBOOK_DEMO_PASSWORD` empty to disable the seeded demo customer, or set a strong value only for a deliberate demo stack.
+3. Build and start:
+
+```powershell
+docker compose --env-file .env config --quiet
+docker compose build
+docker compose up -d
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:8081/api/health
+```
+
+The frontend is published on `127.0.0.1:8081` by default. The backend entrypoint waits for MariaDB, creates the base schema if the database is empty, rotates the seeded administrator to `SKYBOOK_ADMIN_PASSWORD`, and then starts the API. This is why the documented development password never becomes the production password.
+
+`docker compose down` keeps the database volume. `docker compose down -v` deletes it; never use `-v` on a volume holding data you need.
+
+### Render + managed MySQL (free-tier online option)
+
+The repository includes `Dockerfile.render` and `render.yaml` for a **single-container** deployment: Node serves the built React app and `/api` from the same origin. Render's free web service has no persistent disk, so the MySQL database must be external. An always-free Aiven MySQL service is the intended free companion; it requires an Aiven account and may power off after inactivity. Render free web services also sleep after inactivity.
+
+1. Create an Aiven MySQL service and copy its host, port, database, user, password and CA certificate.
+2. Create a Render Blueprint from the GitHub repository; Render reads `render.yaml`.
+3. Fill the `sync: false` environment variables in the Render dashboard: `MYSQL_HOST`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `JWT_SECRET`, `SKYBOOK_ADMIN_EMAIL`, `SKYBOOK_ADMIN_PASSWORD`, and `APP_BASE_URL` (the final Render URL).
+4. If Aiven requires a custom CA, set `MYSQL_SSL_CA_BASE64` to the base64-encoded CA contents; otherwise leave `MYSQL_SSL=true` and the default `MYSQL_SSL_REJECT_UNAUTHORIZED=true`.
+5. Deploy. The first API start creates the base schema in the empty managed database. Open `/api/health`, then test login, registration, search, booking and `/admin`.
+
+See `DEPLOYMENT.md` for the full checklist and limitations. Never commit the Render/Aiven secrets or a real `.env`.

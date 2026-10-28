@@ -11,10 +11,16 @@ RUN cd src/backend && npm ci --omit=dev
 COPY src/backend/ ./src/backend/
 COPY database/skybook.sql ./database/skybook.sql
 
+# The entrypoint is copied from Windows in some checkouts, where the executable
+# bit is not preserved. Make it explicit so Docker can exec it.
+RUN chmod +x /app/src/backend/docker-entrypoint.sh
+
 EXPOSE 8080
 
 ENV NODE_ENV=production
 ENV PORT=8080
+ENV HOST=0.0.0.0
+ENV SERVE_FRONTEND=false
 
 ENTRYPOINT ["/app/src/backend/docker-entrypoint.sh"]
 CMD ["node", "src/backend/server.js"]

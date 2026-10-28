@@ -21,4 +21,6 @@ dist-ssr
 coverage
 count_output.txt
 experiment05_output.txt
-backend-java/experiment05/outputs
+backend-java
+src/backend/skybook.db
+src/backend/skybook.db-*

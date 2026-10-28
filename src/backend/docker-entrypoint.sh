@@ -17,7 +17,10 @@ while [ "$i" -lt "$RETRIES" ]; do
     s.on('connect', () => { s.destroy(); process.exit(0); });
     s.on('error', () => process.exit(1));
   " 2>/dev/null; then
-    echo "✅ MySQL is reachable — starting SkyBook backend."
+    echo "✅ MySQL is reachable — preparing SkyBook."
+    if [ "${SKYBOOK_PREPARE_USERS:-true}" = "true" ]; then
+      node src/backend/prepare-deployment-users.js
+    fi
     exec "$@"
   fi
   i=$((i + 1))

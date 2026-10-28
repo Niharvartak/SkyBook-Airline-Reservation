@@ -14,6 +14,7 @@ const bcrypt  = require("bcryptjs");
 const { createRateLimiter } = require("./rate-limit");
 const { ensureSchema, getUserById: getUserByIdDb } = require("./db-schema");
 const { registerExtensions, minutesBetween, parseTimeToMinutes } = require("./extensions");
+const { buildDbConfig } = require("./db-config");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 // Load project-root .env first, then local .env (local wins)
@@ -22,6 +23,9 @@ dotenv.config();
 
 const app  = express();
 const PORT = process.env.PORT || 8080;
+const HOST = process.env.HOST || "0.0.0.0";
+const SERVE_FRONTEND = /^(1|true|yes|on)$/i.test(String(process.env.SERVE_FRONTEND || ""));
+const FRONTEND_DIST = path.join(__dirname, "../../dist");
 
 const JWT_SECRET  = process.env.JWT_SECRET  || "skybook-default-secret-change-in-production";
 const JWT_EXPIRES = "7d";
@@ -47,19 +51,11 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // ─── MySQL Connection Pool ────────────────────────────────────────────────────
-const pool = mysql.createPool({
-  host              : process.env.MYSQL_HOST     || "127.0.0.1",
-  port              : Number(process.env.MYSQL_PORT) || 3306,
-  user              : process.env.MYSQL_USER     || "root",
-  password          : process.env.MYSQL_PASSWORD || "",
-  database          : process.env.MYSQL_DATABASE || "skybook",
+const pool = mysql.createPool(buildDbConfig({
   waitForConnections: true,
   connectionLimit   : 10,
   queueLimit        : 0,
-  timezone          : "+00:00",
-  charset           : "utf8mb4",
-  decimalNumbers    : true,
-});
+}));
 
 // Verify DB connection on startup
 pool.getConnection()
@@ -1332,6 +1328,20 @@ async function startServer() {
   app.use("/api", (req, res) => {
     res.status(404).json({ ok: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
   });
+
+  // Optional single-container mode (Render/Cloud Run/Fly). Nginx remains the
+  // default frontend in Docker Compose; this lets one Node process serve the
+  // built SPA and the API from the same origin when SERVE_FRONTEND=true.
+  if (SERVE_FRONTEND) {
+    app.use(express.static(FRONTEND_DIST, { index: false, maxAge: "1h" }));
+    app.use((req, res, next) => {
+      if (req.method !== "GET" || req.path.startsWith("/api")) return next();
+      res.sendFile(path.join(FRONTEND_DIST, "index.html"), err => {
+        if (err) next(err);
+      });
+    });
+  }
+
   app.use((error, req, res, _next) => {
     console.error("SERVER ERROR:", error);
     if (res.headersSent) return;
@@ -1344,10 +1354,11 @@ async function startServer() {
     res.status(500).json({ ok: false, message: "Internal server error." });
   });
 
-  const server = app.listen(PORT, () => {
-    console.log(`🚀 SkyBook backend running on http://localhost:${PORT}`);
-    console.log(`🗄️  Database: MySQL – ${process.env.MYSQL_DATABASE || "skybook"}@${process.env.MYSQL_HOST || "127.0.0.1"}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`🚀 SkyBook backend running on http://${HOST}:${PORT}`);
+    console.log(`🗄️  Database: MySQL – ${process.env.MYSQL_DATABASE || "skybook"}@${process.env.MYSQL_HOST || "127.0.0.1"}${process.env.MYSQL_SSL ? " (TLS)" : ""}`);
     console.log(`🔑 JWT auth: enabled`);
+    console.log(`🖥️  Frontend: ${SERVE_FRONTEND ? `served from ${FRONTEND_DIST}` : "separate Nginx/Vite frontend"}`);
     console.log(`🌐 CORS: ${corsOrigins.length ? corsOrigins.join(", ") : (process.env.NODE_ENV === "production" ? "same-origin only" : "development default (all origins)")}`);
   });
 

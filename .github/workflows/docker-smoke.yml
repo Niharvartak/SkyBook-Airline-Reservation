@@ -1,0 +1,68 @@
+name: Docker smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create ephemeral CI environment
+        run: |
+          {
+            echo "MYSQL_ROOT_PASSWORD=$(openssl rand -hex 24)"
+            echo "MYSQL_PASSWORD=$(openssl rand -hex 24)"
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "SKYBOOK_ADMIN_EMAIL=admin@skybook.com"
+            echo "SKYBOOK_ADMIN_PASSWORD=Admin@123"
+            echo "SKYBOOK_DEMO_PASSWORD="
+            echo "SKYBOOK_ALLOW_DEMO_ACCOUNTS=true"
+            echo "SKYBOOK_BIND_ADDRESS=127.0.0.1"
+            echo "SKYBOOK_HTTP_PORT=8081"
+            echo "VITE_API_URL="
+          } > .env.ci
+
+      - name: Validate Compose configuration
+        run: docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci config --quiet
+
+      - name: Build images
+        run: docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci build
+
+      - name: Start stack
+        run: docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci up -d
+
+      - name: Wait for frontend and API health
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8081/api/health; then
+              echo
+              echo "SkyBook is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci ps
+          docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci logs --tail=300
+          exit 1
+
+      - name: Run API and end-to-end suites
+        run: |
+          node src/backend/api-test.js
+          node src/backend/e2e-flow-test.js
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci logs --tail=300
+
+      - name: Stop stack
+        if: always()
+        run: docker compose -f compose.yaml -f compose.ci.yaml --env-file .env.ci down -v

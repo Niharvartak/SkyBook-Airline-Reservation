@@ -1,0 +1,6 @@
+# CI-only override: publish the API on localhost:8080 so the existing test
+# suites (which target that port) can run against the Compose stack.
+services:
+  backend:
+    ports:
+      - "127.0.0.1:8080:8080"
