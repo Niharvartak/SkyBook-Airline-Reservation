@@ -173,6 +173,75 @@ async function ensureBaseSchema(pool) {
   console.log("  ✅ Base schema created.");
 }
 
+async function ensureForwardSchedule(pool) {
+  if (!(await tableExists(pool, "flights"))) return;
+
+  const [[row]] = await pool.query(`
+    SELECT COUNT(*) AS c
+    FROM flights
+    WHERE isActive = 1
+      AND departureDate >= CURDATE()
+      AND departureDate <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+  `);
+  if (row.c >= 1000) return;
+
+  // The base SQL seed contains three days of flights. Clone those rows across
+  // the next 30 days so a fresh Docker/managed database has a usable schedule.
+  // INSERT IGNORE makes this safe on every start.
+  for (let offset = 3; offset <= 30; offset++) {
+    await pool.query(`
+      INSERT IGNORE INTO flights
+        (flightNumber, airline, origin, destination, departureDate, departureTime,
+         arrivalTime, price, status, availableSeats, isActive, durationMinutes,
+         stops, aircraft, cabinClasses, baggageAllowance, terminal, gate, baggageBelt, createdBy)
+      SELECT
+        flightNumber, airline, origin, destination,
+        DATE_ADD(departureDate, INTERVAL ${offset} DAY), departureTime,
+        arrivalTime, price, status, availableSeats, isActive, durationMinutes,
+        stops, aircraft, cabinClasses, baggageAllowance, terminal, gate, baggageBelt, createdBy
+      FROM flights
+      WHERE isActive = 1
+        AND departureDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 2 DAY)
+    `);
+  }
+  console.log("  ➕ forward flight schedule prepared for the next 30 days");
+}
+
+async function ensureSeatInventory(pool) {
+  if (!(await tableExists(pool, "flights")) || !(await tableExists(pool, "seats"))) return;
+
+  const [flights] = await pool.query(`
+    SELECT f.id, DATE_FORMAT(f.departureDate, '%Y-%m-%d') AS travelDate
+    FROM flights f
+    WHERE f.isActive = 1
+      AND f.departureDate >= CURDATE()
+      AND NOT EXISTS (
+        SELECT 1 FROM seats s
+        WHERE s.flightId = f.id AND s.travelDate = f.departureDate
+      )
+  `);
+  if (!flights.length) return;
+
+  const cols = ["A", "B", "C", "D", "E", "F"];
+  const rows = 30; // canonical 180-seat cabin
+  const seatRows = [];
+  for (const flight of flights) {
+    for (let row = 1; row <= rows; row++) {
+      for (const col of cols) {
+        seatRows.push([flight.id, flight.travelDate, `${col}${row}`, "available"]);
+      }
+    }
+  }
+
+  for (let i = 0; i < seatRows.length; i += 5000) {
+    await pool.query(
+      "INSERT IGNORE INTO seats (flightId, travelDate, seatNumber, status) VALUES ?",
+      [seatRows.slice(i, i + 5000)]
+    );
+  }
+  console.log(`  ➕ seat inventory for ${flights.length} flight(s)`);
+}
+
 async function ensureSchema(pool) {
   // Managed databases may start with no tables. Create the base schema before
   // any extension table that has a foreign key to users.
@@ -308,6 +377,10 @@ async function ensureSchema(pool) {
     "INSERT IGNORE INTO app_settings (settingKey, settingValue) VALUES ?",
     [entries]
   );
+
+  // ── Ensure fresh seed/imported flights have a usable schedule and seat map ─
+  await ensureForwardSchedule(pool);
+  await ensureSeatInventory(pool);
 
   // ── Ensure the seeded admin account still exists (never resets a password) ─
   // In production a default password is never created. Provide

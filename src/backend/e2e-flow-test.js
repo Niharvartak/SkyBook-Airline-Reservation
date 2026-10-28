@@ -2,6 +2,13 @@
 const http = require("http");
 const BASE_PORT = 8080;
 
+function dateStr(offset = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const pad = value => String(value).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function req(method, path, body, token) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
@@ -47,15 +54,15 @@ async function check(name, fn) {
   if (!token) { console.log("FATAL: cannot log in", JSON.stringify(login.body)); process.exit(1); }
 
   console.log("\n[1] Round-trip search");
-  const out = await req("GET", "/api/flights/search?from=Mumbai%20(BOM)&to=Delhi%20(DEL)&departureDate=2026-10-25");
+  const out = await req("GET", `/api/flights/search?from=Mumbai%20(BOM)&to=Delhi%20(DEL)&departureDate=${dateStr(0)}`);
   await check("outbound flights found", () => out.body.flights?.length > 0 || `got ${out.body.flights?.length}`);
-  const back = await req("GET", "/api/flights/search?from=Delhi%20(DEL)&to=Mumbai%20(BOM)&departureDate=2026-10-28");
+  const back = await req("GET", `/api/flights/search?from=Delhi%20(DEL)&to=Mumbai%20(BOM)&departureDate=${dateStr(3)}`);
   await check("return flights found", () => back.body.flights?.length > 0 || `got ${back.body.flights?.length}`);
   await check("flight fares present", () => (out.body.flights||[]).every(f => f.price > 0) || "missing price");
   await check("seat availability present", () => (out.body.flights||[]).every(f => typeof f.availableSeats === "number") || "missing availableSeats");
 
   console.log("\n[2] International search + WORLD20 promo");
-  const intl = await req("GET", "/api/flights/search?from=Mumbai%20(BOM)&to=London%20(LHR)&departureDate=2026-10-25");
+  const intl = await req("GET", `/api/flights/search?from=Mumbai%20(BOM)&to=Dubai%20(DXB)&departureDate=${dateStr(0)}`);
   await check("intl flights found", () => intl.body.flights?.length > 0 || `got ${intl.body.flights?.length}`);
   const intlFlight = intl.body.flights?.[0];
   if (intlFlight) {
@@ -108,7 +115,7 @@ async function check(name, fn) {
     await check("dashboard stats", () => (dash.body.stats?.totalFlights > 0 && dash.body.stats?.totalUsers > 0) || JSON.stringify(dash.body.stats));
     const cf = await req("POST", "/api/admin/flights", {
       flightNumber: `SK-E2E${stamp % 10000}`, airline: "SkyBook Airlines",
-      origin: "Mumbai (BOM)", destination: "Goa (GOI)", departureDate: "2026-11-10",
+      origin: "Mumbai (BOM)", destination: "Goa (GOI)", departureDate: dateStr(10),
       departureTime: "06:00 AM", arrivalTime: "07:30 AM", price: 3999,
     }, adminToken);
     await check("create flight", () => ((cf.status === 201 && cf.body.flightId) ? true : `status ${cf.status} ${JSON.stringify(cf.body)}`));
@@ -117,7 +124,7 @@ async function check(name, fn) {
       await check("created flight has 180-seat map", () => (fdet.body.flight?.seats?.length === 180) || `seats=${fdet.body.flight?.seats?.length}`);
       const del = await req("DELETE", `/api/admin/flights/${cf.body.flightId}`, {}, adminToken);
       await check("deactivate flight", () => del.status === 200 || `status ${del.status}`);
-      const gone = await req("GET", "/api/flights/search?from=Mumbai%20(BOM)&to=Goa%20(GOI)&departureDate=2026-11-10");
+      const gone = await req("GET", `/api/flights/search?from=Mumbai%20(BOM)&to=Goa%20(GOI)&departureDate=${dateStr(10)}`);
       await check("deactivated flight excluded from search", () => !(gone.body.flights||[]).some(f => f.id === cf.body.flightId) || "still in search");
     }
     // Authz: user token must be rejected
