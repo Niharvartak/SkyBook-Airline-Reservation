@@ -8,7 +8,7 @@
 |------|--------|
 | Local Vite frontend (`:5173`) + Node/Express backend (`:8080`) + repaired MariaDB copy (`:3307`) | **Verified:** build, lint, API and browser-flow suites pass |
 | Original host MariaDB (`:3306`) | **Blocked:** the original Aria tables are unrepaired; use the copy until recovery is explicitly approved |
-| Docker Compose (`db` + `backend` + Nginx frontend) | **Local verification in progress:** use the commands below and record the result before claiming a healthy stack |
+| Docker Compose (`db` + `backend` + Nginx frontend) | **Verified in GitHub Actions** by `.github/workflows/docker-smoke.yml`: fresh MariaDB stack, health check, API suite 30/30, E2E suite 22/22 |
 | Render single-container + Aiven MySQL | **Prepared, not deployed:** requires a Render account and an Aiven MySQL service |
 
 Do not claim a deployment is live until `/api/health` and the login/booking/admin flows have been tested against the public URL.
@@ -145,6 +145,10 @@ docker compose logs --tail=100 db
 
 `docker compose down` keeps the database volume. `docker compose down -v` deletes it; never use `-v` on a volume holding data you need.
 
+The same stack is exercised by `.github/workflows/docker-smoke.yml` on every push to `main`. It builds both images, starts a fresh MariaDB volume, waits for `/api/health`, and runs `api-test.js` and `e2e-flow-test.js`. The workflow uses `compose.ci.yaml` only to publish the API on `127.0.0.1:8080` for those suites. The last run passed 30/30 API and 22/22 E2E tests.
+
+Local Docker Desktop could not start on the development Windows host because its WSL bootstrap failed; the workflow provides independent Docker build/run verification. Do not treat that local-host limitation as a Compose configuration failure.
+
 To publish a self-hosted Compose stack on a VPS, set `SKYBOOK_BIND_ADDRESS=0.0.0.0` only after configuring the host firewall and an HTTPS reverse proxy. Keep MariaDB and the backend off public ports.
 
 ## Render + Aiven MySQL (free-tier online option)
@@ -207,6 +211,6 @@ The workspace is a Git repository on `main`. Review `git status` and stage only 
 2. No email/SMS delivery; password reset is not self-service in production.
 3. Sample schedules/fares; run `extend-flights.js` to refresh the 30-day window.
 4. No live airline/price/status feed.
-5. Docker Compose local verification must be completed before calling the stack healthy.
+5. Docker Compose is verified in GitHub Actions, not on the local Windows Docker Desktop host (its WSL engine is broken). A local run should still be repeated on a working Docker host before a self-hosted production launch.
 6. Render + Aiven is prepared but cannot be deployed without the user's Render and Aiven accounts.
 7. `backend-java/` and `src/backend/skybook.db` are legacy/unused and are excluded from Docker images.

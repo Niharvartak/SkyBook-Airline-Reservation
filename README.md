@@ -142,9 +142,9 @@ The test suites create labelled QA accounts (`test_*@test.com`, `e2e_*@test.com`
 3. **Sample schedules and fares.** The 30-day window is generated data. Re-run `extend-flights.js` to keep it fresh.
 4. **No live airline/price/status feed.**
 5. **Admin flight removal is safe.** Flights are archived by default; permanent deletion is only available for archived flights with no booking history. The last active administrator cannot be demoted or disabled.
-6. **Docker Compose was not re-verified in the final session** because the Docker daemon was unavailable. The local Vite + Node stack was verified against a repaired MariaDB copy on `:3307`; the original host MariaDB on `:3306` remains unrepaired. See `DEPLOYMENT.md`.
-7. **`backend-java/` and `src/backend/skybook.db` are legacy/unused.** They are intentionally left in place rather than deleted.
-8. **All work is uncommitted on `main`.** No commit, push or history rewrite was performed.
+6. **Docker Compose was verified in GitHub Actions** by `.github/workflows/docker-smoke.yml`: images built, the fresh MariaDB stack started, `/api/health` passed, and the API/E2E suites passed (30/30 and 22/22). The local Docker Desktop WSL daemon was unavailable on this Windows host, so local Docker execution was not possible. The local Vite + Node stack was also verified against a repaired MariaDB copy on `:3307`; the original host MariaDB on `:3306` remains unrepaired.
+7. **`backend-java/` and `src/backend/skybook.db` are legacy/unused.** They are intentionally left in place rather than deleted, and are excluded from Docker images.
+8. **Deployment work is committed and pushed to `main`.** No force-push or history rewrite was performed. Online deployment is still pending the hosting/database account access described in `DEPLOYMENT.md`.
 
 ## Project layout
 
@@ -162,13 +162,19 @@ src/
     extensions.js         # dashboard, reports, auth recovery, admin + scheduler routes
     db-schema.js          # idempotent schema guard + 72-airport catalogue
     set-admin-password.js # one-time admin password initialization / rotation
+    prepare-deployment-users.js # Docker/PaaS account rotation + empty-DB bootstrap
+    db-config.js          # shared MySQL TLS/connection options
     rate-limit.js         # auth brute-force limiter
     api-test.js, e2e-flow-test.js, journey-verify.js,
     extended-api-test.js, admin-security-test.js, integrity-check.js,
     cleanup-test-data.js
     seed-airports-flights.js, seed-network.js, extend-flights.js
-database/skybook.sql      # base schema + demo seed for the Docker initializer
-compose.yaml              # optional db + API + Nginx stack
+database/skybook.sql      # base schema + development seed for the Docker initializer
+compose.yaml              # db + API + Nginx stack
+compose.ci.yaml           # CI-only API port override
+Dockerfile.render         # single-container SPA + API image for Render
+render.yaml               # Render Blueprint (external managed MySQL)
+.github/workflows/docker-smoke.yml # Docker build + fresh-DB smoke test
 ```
 
 ## Docker Compose (local / self-hosted)
